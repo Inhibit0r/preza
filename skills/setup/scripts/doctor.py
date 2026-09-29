@@ -69,6 +69,9 @@ def skill_dir(name):
     return None
 
 
+POINTER_FILES = ("SKILL.md", "references/image-generator.md", "references/executor-base.md")
+
+
 def rules_pointer_exists(skill_file, expected=None):
     """Указатель ведёт к существующему SKILL.md, при наличии ожидаемого — с тем же содержимым.
 
@@ -88,6 +91,14 @@ def rules_pointer_exists(skill_file, expected=None):
                 ):
                     return True
     return False
+
+
+def rules_installed(pm, expected=None):
+    """Указатели во всех трёх файлах ppt-master: прерванный патч не считается выполненным."""
+    return all(
+        (pm / rel).is_file() and rules_pointer_exists(pm / rel, expected)
+        for rel in POINTER_FILES
+    )
 
 
 def req_name(line):
@@ -207,9 +218,7 @@ def checks():
             [f'{PY} -m pip install --user{extra} -r "{req}"'],
         )
         dhr = skill_dir("deck-house-rules")
-        patched = rules_pointer_exists(
-            pm / "SKILL.md", dhr / "SKILL.md" if dhr else None
-        )
+        patched = rules_installed(pm, dhr / "SKILL.md" if dhr else None)
         add(
             core,
             "Правила deck-house-rules в ppt-master",
@@ -425,6 +434,15 @@ def selftest():
         other.write_text("older rules", encoding="utf-8")
         assert rules_pointer_exists(pm_skill)
         assert not rules_pointer_exists(pm_skill, rules)
+        pm = root / "pm"
+        for rel in POINTER_FILES:
+            (pm / rel).parent.mkdir(parents=True, exist_ok=True)
+            (pm / rel).write_text(f"deck-house-rules `{rules}`", encoding="utf-8")
+        assert rules_installed(pm, rules)
+        (pm / POINTER_FILES[2]).write_text("no pointer", encoding="utf-8")
+        assert not rules_installed(pm, rules)  # патч прервался на третьем файле
+        (pm / POINTER_FILES[2]).write_text(f"deck-house-rules `{other}`", encoding="utf-8")
+        assert not rules_installed(pm, rules)  # третий указатель на устаревшие правила
     assert req_name("python-pptx>=0.6.21") == "python-pptx"
     assert (
         req_name("uharfbuzz>=0.50.0 ; sys_platform != 'win32'  # note") == "uharfbuzz"

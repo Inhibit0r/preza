@@ -38,20 +38,25 @@ POINTERS = {
 }
 
 
+def is_pointer(line: str) -> bool:
+    """Only our own pointer lines; other mentions of the name stay untouched."""
+    return line.startswith("> **Local house rule") and f"({MARK})" in line
+
+
 def patch(root: Path) -> bool:
     ok = True
     for rel, (anchor, pointer) in POINTERS.items():
         path = root / rel
         original = path.read_text(encoding="utf-8")
         lines = original.split("\n")
-        marked = [i for i, line in enumerate(lines) if MARK in line]
+        body_start = (
+            lines.index("---", 1) + 1 if rel == "SKILL.md" else 0
+        )  # skip frontmatter
+        marked = [i for i in range(body_start, len(lines)) if is_pointer(lines[i])]
         if marked:
             for i in marked:
                 lines[i] = pointer
         else:
-            body_start = (
-                lines.index("---", 1) + 1 if rel == "SKILL.md" else 0
-            )  # skip frontmatter
             hit = next(
                 (
                     i
@@ -82,11 +87,11 @@ def selftest():
     from tempfile import TemporaryDirectory
     from unittest.mock import patch as mock_patch
 
-    with mock_patch.object(Path, "home", return_value=Path("/Users/art")):
-        assert rules_path(Path("/Users/art/deck-house-rules/SKILL.md")) == (
+    with mock_patch.object(Path, "home", return_value=Path("/Users/ann")):
+        assert rules_path(Path("/Users/ann/deck-house-rules/SKILL.md")) == (
             "~/deck-house-rules/SKILL.md"
         )
-        other = Path("/Users/artem/deck-house-rules/SKILL.md")
+        other = Path("/Users/anna/deck-house-rules/SKILL.md")
         assert rules_path(other) == str(other)
 
     with TemporaryDirectory() as tmp:
@@ -94,8 +99,15 @@ def selftest():
         for rel, (anchor, _) in POINTERS.items():
             path = root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
-            frontmatter = "---\nname: ppt-master\n---\n" if rel == "SKILL.md" else ""
-            path.write_text(frontmatter + anchor + "fixture\n", encoding="utf-8")
+            frontmatter = (
+                "---\nname: ppt-master\ndescription: Uses deck-house-rules\n---\n"
+                if rel == "SKILL.md"
+                else ""
+            )
+            path.write_text(
+                frontmatter + anchor + "fixture\n\nSee deck-house-rules docs.\n",
+                encoding="utf-8",
+            )
         guard = root / "scripts/attribution_guard.py"
         guard.parent.mkdir()
         guard.write_text(
@@ -106,6 +118,9 @@ def selftest():
         )
         assert patch(root)
         inserted = {rel: (root / rel).read_text(encoding="utf-8") for rel in POINTERS}
+        for text in inserted.values():  # чужие упоминания и frontmatter не тронуты
+            assert "See deck-house-rules docs." in text
+        assert "description: Uses deck-house-rules\n" in inserted["SKILL.md"]
         for rel, (anchor, pointer) in POINTERS.items():
             assert inserted[rel].count(pointer) == 1
             assert anchor + "fixture\n\n" + pointer in inserted[rel]

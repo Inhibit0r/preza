@@ -87,7 +87,7 @@ codex login
 
 `$imagegen` встроен в Codex, отдельный ключ для картинок не нужен. Генерация расходует лимит подписки ChatGPT.
 
-Навыки preza можно поставить и в Codex: `codex plugin marketplace add Inhibit0r/preza`, затем `codex plugin add preza@preza`. Ведущим в Codex preza не проверялся — ppt-master ставится как плагин Claude Code.
+Навыки preza можно поставить и в Codex: `codex plugin marketplace add Inhibit0r/preza`, затем `codex plugin add preza@preza`. В Codex они называются `$preza:preza`, `$preza:setup` и `$preza:deck-house-rules` и запускаются только вручную. Ведущим в Codex preza не проверялся — ppt-master ставится как плагин Claude Code.
 
 ### Система (macOS)
 
@@ -122,7 +122,8 @@ python3 skills/setup/scripts/doctor.py --json
 ## Ограничения
 
 - Рендер для проверки идёт через PowerPoint на macOS (AppleScript). На Windows сборка работает, рендер — вручную: PowerPoint → «Сохранить как» PDF → `pdftoppm -png -r 96`.
-- После `claude plugin update ppt-master@ppt-master` запустите `/preza:setup` — он вернёт правила оформления в ppt-master.
+- После `claude plugin update ppt-master@ppt-master` или обновления preza запустите `/preza:setup` — он вернёт или обновит правила оформления в ppt-master.
+- Ручной запуск в Claude Code задаёт флаг `disable-model-invocation: true` в SKILL.md. Установка через `codex plugin add` с ним работает, а валидатор плагинов Codex (`plugin-creator`) считает его ошибкой. Раздача плагина через приложение Codex или общую папку рабочего пространства может его отклонить.
 
 ## Участие
 
