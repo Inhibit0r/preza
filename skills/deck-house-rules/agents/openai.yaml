@@ -1,0 +1,5 @@
+interface:
+  display_name: "deck-house-rules"
+  short_description: "Правила оформления презентаций и генерации картинок"
+policy:
+  allow_implicit_invocation: false

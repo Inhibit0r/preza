@@ -23,10 +23,19 @@ CLAUDE = HOME / ".claude"
 CODEX = Path(os.environ.get("CODEX_HOME") or HOME / ".codex")
 MAC, WIN = sys.platform == "darwin", os.name == "nt"
 PY = "python" if WIN else "python3"
+PLUGIN_SKILLS = Path(__file__).resolve().parents[2]
 SKILL_DIRS = [CLAUDE / "skills", HOME / ".agents/skills", CODEX / "skills"]
 # Обновления проверяются только у плагинов, от которых зависит preza. Официальный маркетплейс собран
 # из чужих репозиториев: его коммит с установленным плагином не сравнить.
-RELATED = {"preza", "ppt-master", "frontend-slides", "claudex-loop", "document-skills", "avoid-ai-writing-russian", "to-md"}
+RELATED = {
+    "preza",
+    "ppt-master",
+    "frontend-slides",
+    "claudex-loop",
+    "document-skills",
+    "avoid-ai-writing-russian",
+    "to-md",
+}
 NO_UPDATE_CHECK = {"claude-plugins-official"}
 
 
@@ -48,8 +57,8 @@ def plugin_key(name):
 
 
 def skill_dir(name):
-    """Папка навыка: личная или внутри установленного плагина."""
-    for d in SKILL_DIRS:
+    """Папка навыка: сначала в своём плагине, затем личная и в других плагинах."""
+    for d in (PLUGIN_SKILLS, *SKILL_DIRS):
         if (d / name / "SKILL.md").is_file():
             return d / name
     for rec in installed_plugins().values():
@@ -58,6 +67,27 @@ def skill_dir(name):
             if (d / "SKILL.md").is_file():
                 return d
     return None
+
+
+def rules_pointer_exists(skill_file, expected=None):
+    """Указатель ведёт к существующему SKILL.md, при наличии ожидаемого — с тем же содержимым.
+
+    Сравнивается содержимое, а не путь: копии preza в Claude, Codex и клоне равноценны.
+    """
+    for line in skill_file.read_text(encoding="utf-8").splitlines():
+        if "deck-house-rules" in line:
+            for target in re.findall(r"`([^`]+)`", line):
+                try:
+                    path = Path(target).expanduser()
+                except RuntimeError:
+                    continue
+                if (
+                    path.name == "SKILL.md"
+                    and path.is_file()
+                    and (expected is None or path.read_bytes() == expected.read_bytes())
+                ):
+                    return True
+    return False
 
 
 def req_name(line):
@@ -177,7 +207,9 @@ def checks():
             [f'{PY} -m pip install --user{extra} -r "{req}"'],
         )
         dhr = skill_dir("deck-house-rules")
-        patched = "deck-house-rules" in (pm / "SKILL.md").read_text(encoding="utf-8")
+        patched = rules_pointer_exists(
+            pm / "SKILL.md", dhr / "SKILL.md" if dhr else None
+        )
         add(
             core,
             "Правила deck-house-rules в ppt-master",
@@ -350,6 +382,49 @@ def report(items, ups):
 
 
 def selftest():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        plugin = root / "plugin/skills"
+        personal = root / "personal"
+        for parent, name in (
+            (plugin, "deck-house-rules"),
+            (personal, "deck-house-rules"),
+            (personal, "selftest-fallback"),
+        ):
+            skill = parent / name
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_text("fixture", encoding="utf-8")
+        with patch.dict(globals(), PLUGIN_SKILLS=plugin, SKILL_DIRS=[personal]):
+            assert skill_dir("deck-house-rules") == plugin / "deck-house-rules"
+            assert skill_dir("selftest-fallback") == personal / "selftest-fallback"
+
+        pm_skill = root / "SKILL.md"
+        rules = plugin / "deck-house-rules/SKILL.md"
+        for text, expected in (
+            ("deck-house-rules", False),
+            (f"ordinary link `{pm_skill}`", False),
+            (f"deck-house-rules `{root / 'missing/SKILL.md'}`", False),
+            ("deck-house-rules `~nonexistentuser_preza_selftest/SKILL.md`", False),
+            (f"deck-house-rules `{rules}` and `$imagegen`", True),
+            ("deck-house-rules `~/plugin/skills/deck-house-rules/SKILL.md`", True),
+        ):
+            pm_skill.write_text(text, encoding="utf-8")
+            with patch.dict(os.environ, HOME=tmp, USERPROFILE=tmp):
+                assert rules_pointer_exists(pm_skill) is expected, text
+                assert rules_pointer_exists(pm_skill, rules) is expected, text
+        with patch.object(Path, "expanduser", side_effect=RuntimeError):
+            assert not rules_pointer_exists(pm_skill, rules)
+        other = personal / "deck-house-rules/SKILL.md"
+        pm_skill.write_text(f"deck-house-rules `{other}`", encoding="utf-8")
+        assert rules_pointer_exists(
+            pm_skill, rules
+        )  # та же версия правил в другой установке
+        other.write_text("older rules", encoding="utf-8")
+        assert rules_pointer_exists(pm_skill)
+        assert not rules_pointer_exists(pm_skill, rules)
     assert req_name("python-pptx>=0.6.21") == "python-pptx"
     assert (
         req_name("uharfbuzz>=0.50.0 ; sys_platform != 'win32'  # note") == "uharfbuzz"

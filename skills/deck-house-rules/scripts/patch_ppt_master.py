@@ -1,15 +1,25 @@
 #!/usr/bin/env python3
-"""Insert deck-house-rules pointers into every installed ppt-master copy (idempotent).
+"""Refresh deck-house-rules pointers in every installed ppt-master copy (idempotent).
 
 Run after `claude plugin update ppt-master@ppt-master`. Exit code != 0 when a copy
 is missing an anchor or its attribution guard fails after patching.
+Use --selftest to test only a temporary fixture.
 """
 
 import subprocess
 import sys
 from pathlib import Path
 
-RULES = str(Path(__file__).resolve().parents[1] / "SKILL.md").replace(str(Path.home()), "~", 1)
+
+def rules_path(path: Path) -> str:
+    """Use ~ only when the path is inside the home directory."""
+    try:
+        return "~/" + path.relative_to(Path.home()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+RULES = rules_path(Path(__file__).resolve().parents[1] / "SKILL.md")
 MARK = "deck-house-rules"
 POINTERS = {
     # file: (anchor line prefix, pointer text); pointer goes right after the anchor line
@@ -32,23 +42,33 @@ def patch(root: Path) -> bool:
     ok = True
     for rel, (anchor, pointer) in POINTERS.items():
         path = root / rel
-        lines = path.read_text(encoding="utf-8").split("\n")
-        if any(MARK in line for line in lines):
-            continue
-        body_start = (
-            lines.index("---", 1) + 1 if rel == "SKILL.md" else 0
-        )  # skip frontmatter
-        hit = next(
-            (i for i in range(body_start, len(lines)) if lines[i].startswith(anchor)),
-            None,
-        )
-        if hit is None:
-            print(f"[FAIL] anchor {anchor!r} not found in {path}")
-            ok = False
-            continue
-        lines[hit + 1 : hit + 1] = ["", pointer]
-        path.write_text("\n".join(lines), encoding="utf-8")
-        print(f"[OK] patched {path}")
+        original = path.read_text(encoding="utf-8")
+        lines = original.split("\n")
+        marked = [i for i, line in enumerate(lines) if MARK in line]
+        if marked:
+            for i in marked:
+                lines[i] = pointer
+        else:
+            body_start = (
+                lines.index("---", 1) + 1 if rel == "SKILL.md" else 0
+            )  # skip frontmatter
+            hit = next(
+                (
+                    i
+                    for i in range(body_start, len(lines))
+                    if lines[i].startswith(anchor)
+                ),
+                None,
+            )
+            if hit is None:
+                print(f"[FAIL] anchor {anchor!r} not found in {path}")
+                ok = False
+                continue
+            lines[hit + 1 : hit + 1] = ["", pointer]
+        updated = "\n".join(lines)
+        if updated != original:
+            path.write_text(updated, encoding="utf-8")
+            print(f"[OK] patched {path}")
     guard = subprocess.run(
         [sys.executable, str(root / "scripts/attribution_guard.py")],
         capture_output=True,
@@ -58,9 +78,66 @@ def patch(root: Path) -> bool:
     return ok and guard.returncode == 0
 
 
-roots = sorted(
-    Path.home().glob(".claude/plugins/cache/ppt-master/ppt-master/*/ppt-master")
-)
-if not roots:
-    sys.exit("[FAIL] ppt-master is not installed")
-sys.exit(0 if all([patch(r) for r in roots]) else 1)
+def selftest():
+    from tempfile import TemporaryDirectory
+    from unittest.mock import patch as mock_patch
+
+    with mock_patch.object(Path, "home", return_value=Path("/Users/art")):
+        assert rules_path(Path("/Users/art/deck-house-rules/SKILL.md")) == (
+            "~/deck-house-rules/SKILL.md"
+        )
+        other = Path("/Users/artem/deck-house-rules/SKILL.md")
+        assert rules_path(other) == str(other)
+
+    with TemporaryDirectory() as tmp:
+        root = Path(tmp) / "ppt-master"
+        for rel, (anchor, _) in POINTERS.items():
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            frontmatter = "---\nname: ppt-master\n---\n" if rel == "SKILL.md" else ""
+            path.write_text(frontmatter + anchor + "fixture\n", encoding="utf-8")
+        guard = root / "scripts/attribution_guard.py"
+        guard.parent.mkdir()
+        guard.write_text(
+            "from pathlib import Path\n"
+            "with Path(__file__).with_suffix('.calls').open('a') as log:\n"
+            "    log.write('called\\n')\n",
+            encoding="utf-8",
+        )
+        assert patch(root)
+        inserted = {rel: (root / rel).read_text(encoding="utf-8") for rel in POINTERS}
+        for rel, (anchor, pointer) in POINTERS.items():
+            assert inserted[rel].count(pointer) == 1
+            assert anchor + "fixture\n\n" + pointer in inserted[rel]
+            (root / rel).write_text(
+                inserted[rel].replace(RULES, "~/obsolete/deck-house-rules/SKILL.md"),
+                encoding="utf-8",
+            )
+        assert patch(root)
+        assert inserted == {
+            rel: (root / rel).read_text(encoding="utf-8") for rel in POINTERS
+        }
+        assert patch(root)
+        assert inserted == {
+            rel: (root / rel).read_text(encoding="utf-8") for rel in POINTERS
+        }
+        assert guard.with_suffix(".calls").read_text().splitlines() == ["called"] * 3
+        guard.write_text("raise SystemExit(1)\n", encoding="utf-8")
+        assert not patch(root)
+    print("selftest ok")
+
+
+def main():
+    if "--selftest" in sys.argv:
+        selftest()
+        return 0
+    roots = sorted(
+        Path.home().glob(".claude/plugins/cache/ppt-master/ppt-master/*/ppt-master")
+    )
+    if not roots:
+        sys.exit("[FAIL] ppt-master is not installed")
+    return 0 if all([patch(r) for r in roots]) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

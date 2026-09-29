@@ -1,0 +1,5 @@
+interface:
+  display_name: "preza: setup"
+  short_description: "Проверка окружения preza и установка недостающего"
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,21 @@
+{
+  "name": "preza",
+  "interface": {
+    "displayName": "preza"
+  },
+  "plugins": [
+    {
+      "name": "preza",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/Inhibit0r/preza.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

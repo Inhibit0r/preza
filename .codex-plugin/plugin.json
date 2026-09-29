@@ -1,0 +1,28 @@
+{
+  "name": "preza",
+  "version": "1.0.0",
+  "description": "Презентация под ключ: маршрут из блоков под задачу, сборка нативного PPTX через ppt-master, ревью и картинки через Codex.",
+  "author": {
+    "name": "Inhibit0r",
+    "url": "https://github.com/Inhibit0r"
+  },
+  "homepage": "https://github.com/Inhibit0r/preza",
+  "repository": "https://github.com/Inhibit0r/preza",
+  "license": "MIT",
+  "keywords": ["presentation", "pptx", "powerpoint", "ppt-master", "codex", "slides"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "preza",
+    "shortDescription": "Презентация под ключ",
+    "longDescription": "Собирает презентацию маршрутом из блоков: факты, история, облик, сборка и проверка. Нативный PPTX через ppt-master, ревью и картинки через Codex, речь в Word по слайдам.",
+    "developerName": "Inhibit0r",
+    "category": "Productivity",
+    "capabilities": ["Instructions"],
+    "websiteURL": "https://github.com/Inhibit0r/preza",
+    "defaultPrompt": [
+      "$preza:preza Сделай доклад на 6 минут про рынок и ценовую политику компании X.",
+      "$preza:preza Подготовь черновик презентации моей идеи для команды на 10 минут.",
+      "$preza:setup Проверь, что для preza всё установлено."
+    ]
+  }
+}
