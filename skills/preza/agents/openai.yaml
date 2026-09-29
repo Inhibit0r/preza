@@ -1,0 +1,5 @@
+interface:
+  display_name: "preza"
+  short_description: "Презентация под ключ: маршрут из блоков, ppt-master, ревью с Codex"
+policy:
+  allow_implicit_invocation: false

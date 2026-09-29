@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "preza",
+  "description": "Презентации в PowerPoint маршрутом из блоков: факты, история, облик, сборка, проверка.",
+  "owner": {
+    "name": "Inhibit0r",
+    "url": "https://github.com/Inhibit0r"
+  },
+  "plugins": [
+    {
+      "name": "preza",
+      "description": "Презентация под ключ: ppt-master для нативного PPTX, Codex для ревью и картинок, речь в Word по слайдам.",
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}
