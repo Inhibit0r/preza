@@ -25,7 +25,7 @@ POINTERS = {
     # file: (anchor line prefix, pointer text); pointer goes right after the anchor line
     "SKILL.md": (
         "# ",
-        f"> **Local house rules ({MARK}):** before planning images or decoration read `{RULES}` — slide images only via claudex-loop + Codex `$imagegen`; no glow-ellipse highlights.",
+        f"> **Local house rules ({MARK}):** before planning images or decoration load the skill `preza:deck-house-rules` with the Skill tool, not by reading the file, so the status line shows it (Codex: read `{RULES}`) — slide images only via claudex-loop + Codex `$imagegen`; no glow-ellipse highlights.",
     ),
     "references/image-generator.md": (
         "**Trigger**",
