@@ -127,7 +127,7 @@ python3 skills/setup/scripts/doctor.py --json
 
 - Рендер для проверки идёт через PowerPoint на macOS (AppleScript). На Windows сборка работает, рендер — вручную: PowerPoint → «Сохранить как» PDF → `pdftoppm -png -r 96`.
 - После `claude plugin update ppt-master@ppt-master` или обновления preza запустите `/preza:setup` — он вернёт или обновит правила оформления в ppt-master.
-- Ручной запуск в Claude Code задаёт флаг `disable-model-invocation: true` в SKILL.md. Установка через `codex plugin add` с ним работает, а валидатор плагинов Codex (`plugin-creator`) считает его ошибкой. Раздача плагина через приложение Codex или общую папку рабочего пространства может его отклонить.
+- Навыки preza запускаются только по явной команде (`/preza:…`, в Codex `$preza:…`): в Claude Code это записано в описании навыка, в Codex — политикой `allow_implicit_invocation: false` в `agents/openai.yaml`. Флага `disable-model-invocation` нет, поэтому вызов через инструмент `Skill` проходит без ошибки и строка состояния (claude-hud) показывает навык.
 
 ## Участие
 
