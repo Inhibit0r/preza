@@ -27,7 +27,7 @@ preza задаст до четырёх вопросов, покажет марш
 |---|---|---|
 | Claude Code | ведущий: план, текст, сборка | всегда |
 | [ppt-master](https://github.com/hugohe3/ppt-master) + его Python-пакеты | SVG → нативный PPTX | всегда |
-| [claudex-loop](https://github.com/chaseai-yt/claudex-loop) | ревью плана и картинок в Codex | всегда |
+| [claudex-loop](https://github.com/chaseai-yt/claudex-loop) | ревью раскадровки, картинок, брифа движения и аудит правок в Codex | всегда |
 | Codex CLI, вход по подписке ChatGPT | ревью, иллюстрации через `$imagegen` | всегда |
 | Microsoft PowerPoint (macOS) | эталонный рендер слайдов для проверки | всегда |
 | poppler | PDF → PNG, проверка шрифтов | всегда |
