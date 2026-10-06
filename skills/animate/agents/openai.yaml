@@ -1,0 +1,5 @@
+interface:
+  display_name: "preza: animate"
+  short_description: "Анимация показа: Morph, переходы, появление объектов и чистая версия"
+policy:
+  allow_implicit_invocation: false
