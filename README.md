@@ -13,6 +13,8 @@ codex plugin add preza@preza
 
 Начните новую сессию, вызовите `$preza:setup`, затем `$preza:preza` с задачей.
 
+Marketplace использует файлы своего выбранного checkout: `codex plugin marketplace add Inhibit0r/preza --ref <ветка-или-тег>` сохраняет выбранную версию и не переадресует установку плагина обратно на `main`.
+
 Claude Code:
 
 ```sh
