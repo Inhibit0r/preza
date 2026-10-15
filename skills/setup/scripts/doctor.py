@@ -9,6 +9,7 @@
 Только стандартная библиотека. Код выхода 1 — не хватает обязательного.
 """
 
+import argparse
 import json
 import os
 import re
@@ -23,8 +24,9 @@ CLAUDE = HOME / ".claude"
 CODEX = Path(os.environ.get("CODEX_HOME") or HOME / ".codex")
 MAC, WIN = sys.platform == "darwin", os.name == "nt"
 PY = "python" if WIN else "python3"
-PLUGIN_SKILLS = Path(__file__).resolve().parents[2]
-SKILL_DIRS = [CLAUDE / "skills", HOME / ".agents/skills", CODEX / "skills"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "preza/scripts"))
+import runtime
+HOST = None
 # Обновления проверяются только у плагинов, от которых зависит preza. Официальный маркетплейс собран
 # из чужих репозиториев: его коммит с установленным плагином не сравнить.
 RELATED = {
@@ -57,16 +59,7 @@ def plugin_key(name):
 
 
 def skill_dir(name):
-    """Папка навыка: сначала в своём плагине, затем личная и в других плагинах."""
-    for d in (PLUGIN_SKILLS, *SKILL_DIRS):
-        if (d / name / "SKILL.md").is_file():
-            return d / name
-    for rec in installed_plugins().values():
-        root = Path(rec.get("installPath", ""))
-        for d in (root / name, root / "skills" / name):
-            if (d / "SKILL.md").is_file():
-                return d
-    return None
+    return runtime.find_skill(name, HOST, HOME)
 
 
 POINTER_FILES = ("SKILL.md", "references/image-generator.md", "references/executor-base.md")
@@ -135,11 +128,28 @@ def run(cmd, timeout=15):
         return 1, str(e)
 
 
-def mcp_names():
+def mcp_names(host=None):
+    host = runtime.resolve_host(host or HOST)
+    if host == "codex":
+        path = CODEX / "config.toml"
+        if not path.is_file():
+            return set()
+        try:
+            import tomllib
+        except ImportError:  # Python 3.10 remains supported for Claude and CLI-backed Codex discovery.
+            cli = shutil.which("codex")
+            code, text = run([cli, "mcp", "list", "--json"]) if cli else (1, "")
+            rows = json.loads(text) if code == 0 else []
+            return {r["name"].lower() for r in rows if r.get("enabled", True)}
+        servers = tomllib.loads(path.read_text(encoding="utf-8")).get("mcp_servers", {})
+        return {name.lower() for name, row in servers.items() if row.get("enabled", True)}
     d = load_json(HOME / ".claude.json")
     names = set(d.get("mcpServers", {}))
-    for proj in d.get("projects", {}).values():
-        names |= set(proj.get("mcpServers", {}))
+    # MCP from another project is not evidence for the current project.
+    cwd = os.path.normcase(str(Path.cwd().resolve()))
+    for project, config in d.get("projects", {}).items():
+        if os.path.normcase(str(Path(project).resolve())) == cwd:
+            names |= set(config.get("mcpServers", {}))
     return {n.lower() for n in names}
 
 
@@ -167,7 +177,10 @@ def powerpoint_found():
     return False
 
 
-def checks():
+def checks(host=None):
+    global HOST
+    HOST = runtime.resolve_host(host or HOST)
+    host = HOST
     """Список проверок: группа, компонент, есть ли, подробность, команды, ручные шаги."""
     out = []
 
@@ -184,12 +197,6 @@ def checks():
         )
 
     core, block = "Ядро", "По блокам"
-    add(
-        core,
-        "Claude Code CLI",
-        shutil.which("claude"),
-        manual="установите Claude Code: https://code.claude.com",
-    )
     add(
         core,
         "Python ≥ 3.10",
@@ -229,34 +236,31 @@ def checks():
             else "установите плагин preza — в нём навык deck-house-rules",
         )
 
-    add(
-        core,
-        "claudex-loop (ревью с Codex)",
-        skill_dir("claudex-loop"),
-        fix=install_plugin("chaseai-yt/claudex-loop", "claudex-loop"),
-    )
-    codex = shutil.which("codex")
-    add(core, "Codex CLI", codex, fix=["npm install -g @openai/codex"])
-    if codex:
-        code, text = run(["codex", "login", "status"])
-        add(
-            core,
-            "Codex: вход выполнен",
-            code == 0,
-            text.splitlines()[-1] if text else "",
-            manual="выполните в терминале: codex login",
-        )
-        add(
-            core,
-            "Codex: навык $imagegen",
-            (CODEX / "skills/.system/imagegen").is_dir(),
-            fix=["npm install -g @openai/codex@latest"],
-        )
+    reviewer = runtime.roles(host)["reviewer"]
+    add(core, f"claudex-loop (ревью с {reviewer})", skill_dir("claudex-loop"),
+        manual="подключите общий навык claudex-loop к текущему хосту")
+    cli = shutil.which(reviewer)
+    add(core, f"{reviewer}: CLI рецензента", cli,
+        manual=f"установите CLI рецензента {reviewer}")
+    if cli:
+        command = [cli, "auth", "status"] if reviewer == "claude" else [cli, "login", "status"]
+        code, text = run(command)
+        if reviewer == "claude" and code == 0:
+            try:
+                code = 0 if json.loads(text).get("loggedIn") else 1
+            except ValueError:
+                code = 1
+        add(core, f"{reviewer}: вход рецензента", code == 0,
+            "вход подтверждён" if code == 0 else "вход не подтверждён; выполните штатный login",
+            manual=f"выполните вход через CLI {reviewer}")
+    add(block, "Codex imagegen (Облик)", (CODEX / "skills/.system/imagegen").is_dir(),
+        "наличие инструкции; инструмент генерации проверяется в активной сессии",
+        manual="используйте сессию Codex с фактически доступным imagegen")
     add(
         core,
         "Microsoft PowerPoint (рендер)",
         powerpoint_found(),
-        "render_pptx.sh работает только на macOS" if not MAC else "",
+        "scripts/render_pptx.py: PowerPoint COM" if WIN else "scripts/render_pptx.py: AppleScript",
         manual="установите Microsoft PowerPoint (Office 2021 / Microsoft 365)",
     )
     poppler = shutil.which("pdftoppm") and shutil.which("pdffonts")
@@ -272,7 +276,7 @@ def checks():
         manual="установите poppler и добавьте его bin в PATH" if WIN else "",
     )
 
-    mcp = mcp_names()
+    mcp = mcp_names(host)
     for name, url, var in (
         ("tavily", "https://mcp.tavily.com/mcp", "TAVILY_API_KEY"),
         ("firecrawl", "https://mcp.firecrawl.dev/v2/mcp", "FIRECRAWL_API_KEY"),
@@ -282,12 +286,11 @@ def checks():
             block,
             f"{name.capitalize()} MCP (Факты, Референсы)",
             ok,
-            fix=[
-                f"claude mcp add -s user -t http {name} {url} -H 'Authorization: Bearer ${{{var}}}'"
-            ],
-            manual=f"ключ положите в переменную {var} в профиле оболочки",
+            detail=f"регистрация {host}; вызов и авторизацию проверяйте в активной сессии",
+            fix=[f"claude mcp add -s user -t http {name} {url} -H 'Authorization: Bearer ${{{var}}}'"] if host == "claude" else [],
+            manual=f"подключите {name} к {host}; ключи и OAuth остаются локально",
         )
-        if ok and not os.environ.get(var):
+        if host == "claude" and ok and not os.environ.get(var):
             out[-1]["detail"] = (
                 f"{var} не видна этому процессу — если MCP берёт ключ из неё, проверьте профиль"
             )
@@ -349,7 +352,9 @@ def updates():
         sha = rec.get("gitCommitSha")
         if name not in RELATED or market in NO_UPDATE_CHECK or not (url and sha):
             continue
-        code, text = run(["git", "ls-remote", url, "HEAD"], timeout=8)
+        source = markets.get(market, {}).get("source", {})
+        ref = source.get("ref") or "HEAD"
+        code, text = run(["git", "ls-remote", url, ref], timeout=8)
         head = text.split()[0] if code == 0 and text else ""
         if head and head != sha:
             found.append(
@@ -384,7 +389,7 @@ def report(items, ups):
     if cmds:
         print("Команды для недостающего и обновлений:")
         print("\n".join(f"  {cmd}" for cmd in dict.fromkeys(cmds)))
-        print("  После установки плагинов — /reload-plugins в Claude Code.\n")
+        print("  После установки: Claude — /reload-plugins; Codex — новый сеанс.\n")
     if manual:
         print("Вручную:")
         print("\n".join(f"  - {m}" for m in manual))
@@ -397,7 +402,7 @@ def selftest():
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
         plugin = root / "plugin/skills"
-        personal = root / "personal"
+        personal = root / ".agents/skills"
         for parent, name in (
             (plugin, "deck-house-rules"),
             (personal, "deck-house-rules"),
@@ -406,7 +411,7 @@ def selftest():
             skill = parent / name
             skill.mkdir(parents=True)
             (skill / "SKILL.md").write_text("fixture", encoding="utf-8")
-        with patch.dict(globals(), PLUGIN_SKILLS=plugin, SKILL_DIRS=[personal]):
+        with patch.object(runtime, "SKILLS", plugin), patch.dict(globals(), HOME=root):
             assert skill_dir("deck-house-rules") == plugin / "deck-house-rules"
             assert skill_dir("selftest-fallback") == personal / "selftest-fallback"
 
@@ -466,17 +471,26 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
         sys.exit()
-    items = checks()
-    ups = [] if "--offline" in sys.argv else updates()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", choices=["claude", "codex"])
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    try:
+        HOST = runtime.resolve_host(args.host)
+        items = checks(HOST)
+    except (OSError, ValueError) as error:
+        if args.json:
+            print(json.dumps({"required_ok": False, "error": str(error)}, ensure_ascii=False))
+        else:
+            print(str(error), file=sys.stderr)
+        sys.exit(2)
+    ups = [] if args.offline else updates()
     required_ok = all(c["ok"] for c in items if c["group"] == "Ядро")
-    if "--json" in sys.argv:
-        print(
-            json.dumps(
-                {"required_ok": required_ok, "checks": items, "updates": ups},
-                ensure_ascii=False,
-                indent=1,
-            )
-        )
+    if args.json:
+        print(json.dumps({"required_ok": required_ok, "runtime": runtime.context(HOST),
+                          "checks": items, "updates": ups}, ensure_ascii=False, indent=1))
     else:
+        print(f"Хост: {HOST}; независимый рецензент: {runtime.roles(HOST)['reviewer']}")
         report(items, ups)
     sys.exit(0 if required_ok else 1)

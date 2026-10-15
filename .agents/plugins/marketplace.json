@@ -7,9 +7,8 @@
     {
       "name": "preza",
       "source": {
-        "source": "url",
-        "url": "https://github.com/Inhibit0r/preza.git",
-        "ref": "main"
+        "source": "local",
+        "path": "./"
       },
       "policy": {
         "installation": "AVAILABLE",
