@@ -81,7 +81,7 @@ if __name__ == "__main__":
         from pptx import Presentation
 
         deck = Presentation(a.pptx)
-    errors, per = check(Path(a.script).read_text(), a.slides, lo, hi, a.forbid, deck)
+    errors, per = check(Path(a.script).read_text(encoding="utf-8"), a.slides, lo, hi, a.forbid, deck)
     print(f"разделов={len(per)} слов={sum(per)} по слайдам={per}")
     for e in errors:
         print("  -", e)

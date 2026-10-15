@@ -1,138 +1,108 @@
 # preza
 
-Презентации в PowerPoint под ключ для Claude Code. Вы описываете задачу, preza собирает под неё маршрут из блоков — факты, ваши материалы или идеи, разбор образцов, история, облик, сборка, проверка — и выдаёт нативный PPTX через [ppt-master](https://github.com/hugohe3/ppt-master). Графики и таблицы в нём — объекты PowerPoint, текст редактируется. Codex проверяет план и рисует иллюстрации. По желанию — речь по слайдам в Word.
+Презентации в редактируемом PowerPoint для Codex и Claude Code. Начальная сессия ведёт работу, противоположный провайдер проверяет план через [claudex-loop](https://github.com/chaseai-yt/claudex-loop), изображения создаёт Codex с доступным imagegen. [PPT Master](https://github.com/hugohe3/ppt-master) собирает SVG в нативный PPTX. Речь в Word и анимация добавляются по запросу.
 
 ## Быстрый старт
 
-В сессии Claude Code:
+Codex:
 
-```
-/plugin marketplace add Inhibit0r/preza
-/plugin install preza@preza
-/reload-plugins
-/preza:setup
+```sh
+codex plugin marketplace add Inhibit0r/preza
+codex plugin add preza@preza
 ```
 
-`/preza:setup` покажет, чего не хватает, и предложит поставить. Затем:
+Начните новую сессию, вызовите `$preza:setup`, затем `$preza:preza` с задачей.
 
-```
-/preza:preza доклад на 6 минут: ценовая политика и вертикальная интеграция компании X
-```
+Claude Code:
 
-preza задаст до четырёх вопросов, покажет маршрут и остановится для вашего решения на раскадровке, выборе облика и финале.
-
-## Что нужно
-
-| Компонент | Зачем | Нужен |
-|---|---|---|
-| Claude Code | ведущий: план, текст, сборка | всегда |
-| [ppt-master](https://github.com/hugohe3/ppt-master) + его Python-пакеты | SVG → нативный PPTX | всегда |
-| [claudex-loop](https://github.com/chaseai-yt/claudex-loop) | ревью раскадровки, картинок, брифа движения и аудит правок в Codex | всегда |
-| Codex CLI, вход по подписке ChatGPT | ревью, иллюстрации через `$imagegen` | всегда |
-| Microsoft PowerPoint (macOS) | эталонный рендер слайдов для проверки | всегда |
-| poppler | PDF → PNG, проверка шрифтов | всегда |
-| Tavily и Firecrawl MCP | поиск | блоки «Факты», «Референсы» |
-| [frontend-slides](https://github.com/zarazhangrui/frontend-slides) | разбор образцов PPTX, дизайн-шаблоны | «Референсы» |
-| document-skills (docx) из [anthropics/skills](https://github.com/anthropics/skills) | речь в Word | «Речь» |
-| [avoid-ai-writing-russian](https://github.com/ormeilu/avoid-ai-writing-russian) и детектор `aiw-ru` | проверка речи на приметы ИИ-текста | «Речь» |
-| [mattpocock-skills](https://github.com/mattpocock/skills) (`grill-me`) | интервью по вашим идеям | «Идеи» |
-| [to-md](https://github.com/Inhibit0r/to-md) или pandoc | чтение ваших файлов | «Материалы» |
-
-## Установка
-
-Точные команды с путями для вашей машины выдаёт `/preza:setup`. Ниже — то же вручную.
-
-### Claude Code — ведущий
-
-```bash
+```sh
 claude plugin marketplace add Inhibit0r/preza
 claude plugin install preza@preza
+```
 
+В сессии выполните `/reload-plugins`, `/preza:setup`, затем `/preza:preza` с задачей. Навыки остаются ручными: политика Codex `allow_implicit_invocation: false` сохранена; Claude использует описание и настоящий Skill tool при его наличии.
+
+На устройствах с управляемым переносимым стеком используйте его post-install обработчик вместо прямой установки.
+
+## Начальное окружение
+
+| Начальная сессия | Ведущий | Независимый рецензент | Генерация изображений |
+|---|---|---|---|
+| Codex | Codex | Claude CLI | встроенный imagegen, если доступен в сессии |
+| Claude Code | Claude | Codex CLI | сессия Codex с imagegen |
+
+Хост определяется по самой сессии и записывается в `runtime.json`; наличие двух CLI не задаёт ведущего. Скрипт распознаёт однозначный маркер `CODEX_THREAD_ID` / `CLAUDECODE`, при отсутствии или конфликте требует `--host`. Модели сохраняют настройки текущей среды; имена моделей одного клиента не подставляются в другой.
+
+Файлы PPT Master ищутся в общей библиотеке `~/.agents/skills`, личных навыках клиентов и зарегистрированных пользовательских плагинах Claude. Codex читает их инструкцию по абсолютному пути; регистрация в Claude не означает доступность Skill tool в Codex. Копирование Markdown не переносит OAuth, MCP и нативные инструменты. Подробнее — [hosts.md](skills/preza/references/hosts.md).
+
+## Зависимости
+
+| Компонент | Назначение |
+|---|---|
+| Python 3.10+ | диагностика, сборка и проверка; Windows запускает с `-X utf8` |
+| PPT Master и его `requirements.txt` | SVG → PPTX |
+| claudex-loop и авторизованный CLI противоположного провайдера | независимое ревью |
+| Microsoft PowerPoint на Windows или macOS | эталонный рендер |
+| Poppler: `pdftoppm`, `pdffonts` | PDF → PNG, шрифты |
+| сессия Codex с imagegen | изображения, когда они включены в оформление |
+
+PPT Master можно установить как плагин Claude и использовать его зарегистрированные файлы из Codex:
+
+```sh
 claude plugin marketplace add hugohe3/ppt-master
 claude plugin install ppt-master@ppt-master
-claude plugin marketplace add chaseai-yt/claudex-loop
-claude plugin install claudex-loop@claudex-loop
+python -X utf8 -m pip install --user -r <PPT_MASTER>/requirements.txt
+python -X utf8 <PREZA>/skills/deck-house-rules/scripts/patch_ppt_master.py
 ```
 
-Python-пакеты ppt-master и правила оформления preza внутри ppt-master:
+На Mac используйте `python3`; ограничения установки Python-пакетов зависят от выбранной среды. Патчер меняет только управляемые указатели в трёх документах PPT Master. Guard, лицензия и спонсорская атрибуция сохраняются. После обновления любого из плагинов повторите setup.
 
-```bash
-python3 -m pip install --user -r <папка ppt-master>/requirements.txt   # Homebrew Python: добавьте --break-system-packages
-python3 <папка preza>/skills/deck-house-rules/scripts/patch_ppt_master.py
+Для отдельных блоков: Tavily/Firecrawl — внешние факты и поиск образцов; pandoc — материалы; frontend-slides — образцы; grill-me/grilling — идеи; доступный docx-навык, antiplagiat, avoid-ai-writing-russian и `aiw-ru` — речь. GitHub MCP нужен для репозиториев, но не является обязательным условием сборки презентации. Canva не требуется.
+
+## Диагностика
+
+```sh
+python -X utf8 <PREZA>/skills/setup/scripts/doctor.py --host codex --offline --json
+python -X utf8 <PREZA>/skills/setup/scripts/doctor.py --host claude --offline --json
 ```
 
-Необязательное — нужно только своим блокам:
+Без `--offline` проверяются обновления зарегистрированных зависимостей. Код 0 — обязательные компоненты обнаружены и вход рецензента подтверждён; 1 — не хватает обязательного; 2 — не определён хост или ошибка конфигурации. Обнаруженный MCP ещё требует реального вызова в активной сессии; обнаруженная инструкция imagegen ещё не доказывает наличие инструмента.
 
-```bash
-claude plugin marketplace add zarazhangrui/frontend-slides && claude plugin install frontend-slides@frontend-slides
-claude plugin marketplace add anthropics/skills && claude plugin install document-skills@anthropic-agent-skills
-claude plugin marketplace add ormeilu/avoid-ai-writing-russian && claude plugin install avoid-ai-writing-russian@avoid-ai-writing-russian
-uv tool install aiw-ru
-claude plugin install mattpocock-skills
-claude plugin marketplace add Inhibit0r/to-md && claude plugin install to-md@to-md
+## Маршрут
 
-# поиск; ключи — в переменных TAVILY_API_KEY и FIRECRAWL_API_KEY профиля оболочки
-claude mcp add -s user -t http tavily https://mcp.tavily.com/mcp -H 'Authorization: Bearer ${TAVILY_API_KEY}'
-claude mcp add -s user -t http firecrawl https://mcp.firecrawl.dev/v2/mcp -H 'Authorization: Bearer ${FIRECRAWL_API_KEY}'
-```
-
-После установки плагинов — `/reload-plugins` в сессии.
-
-### Codex CLI — напарник
-
-```bash
-npm install -g @openai/codex
-codex login
-```
-
-`$imagegen` встроен в Codex, отдельный ключ для картинок не нужен. Генерация расходует лимит подписки ChatGPT.
-
-Навыки preza можно поставить и в Codex: `codex plugin marketplace add Inhibit0r/preza`, затем `codex plugin add preza@preza`. В Codex они называются `$preza:preza`, `$preza:setup` и `$preza:deck-house-rules` и запускаются только вручную. Ведущим в Codex preza не проверялся — ppt-master ставится как плагин Claude Code.
-
-### Система (macOS)
-
-```bash
-brew install poppler
-```
-
-Microsoft PowerPoint (Office 2021 или Microsoft 365) откройте один раз. При первом рендере macOS спросит разрешение управлять PowerPoint — разрешите.
-
-## Проверка окружения
-
-`/preza:setup` запускает `skills/setup/scripts/doctor.py`: проверяет ядро и компоненты блоков, сравнивает установленные плагины с их репозиториями и предлагает установить или обновить недостающее. Из терминала:
-
-```bash
-python3 skills/setup/scripts/doctor.py            # таблица и команды
-python3 skills/setup/scripts/doctor.py --offline  # без проверки обновлений
-python3 skills/setup/scripts/doctor.py --json
-```
-
-Код выхода 1 — не хватает обязательного.
-
-## Как пользоваться
-
-| Запрос | Маршрут |
+| Источник / запрос | Блоки |
 |---|---|
-| `/preza:preza доклад на 6 минут: структура рынка и ценовая политика компании X` | Факты → История → Облик → Сборка → Проверка |
-| `/preza:preza внутренняя презентация для команды про мою идею, 10 минут, черновик` | Идеи → История → Облик → Сборка → лёгкая проверка |
-| `/preza:preza в refs/ три презентации — разбери приёмы и сделай свою про итоги квартала по report.xlsx, для руководства` | Референсы → Материалы → История → Облик → Сборка → полная проверка |
-| `/preza:preza питч на 5 минут по моим материалам, с анимацией показа — чтобы было вау` | Материалы → История → Облик → Движение → Сборка → Проверка; показ с Morph и, по ответу, чистая версия |
-| `/preza:animate` в папке собранного проекта | Движение для готовой колоды: бриф, промежуточные слайды Morph, `animations.json`, показ и чистая версия |
+| Внешний доклад | Факты → История → Облик → Сборка → Проверка |
+| Файлы пользователя | Материалы → История → Облик → Сборка → Проверка |
+| Идея | Идеи → История → Облик → Сборка → Проверка |
+| Образцы | Референсы → нужный источник содержания → основной маршрут |
+| Анимация | Движение между Обликом и Сборкой; `/preza:animate` / `$preza:animate` для готового проекта |
+| Речь | Word по финальным слайдам |
 
-Анимация — блок [Движение](skills/preza/blocks/motion.md): Morph, переходы и появление объектов пишет ppt-master в нативный PPTX; чистая версия без переходов, анимаций и промежуточных слайдов собирается из показа скриптом `skills/preza/scripts/clean_deck.py`.
+Нерешённые содержательные выборы согласуются с пользователем; уже заданный бриф и разрешённые действия сохраняются. Контрольный прогон записывает технические решения отдельно и не выдаёт их за пользовательское принятие рабочей презентации. Роли, ход и доказательства сохраняются в `PLAN.md`.
 
-Облик каждой презентации выводится из её темы: шаблоны ppt-master служат библиотекой приёмов, фоны и иллюстрации рисует Codex. Порядок работы — в [skills/preza/SKILL.md](skills/preza/SKILL.md), блоки — в [skills/preza/blocks](skills/preza/blocks).
+House rules одинаковы на обоих хостах: план изображений проходит независимое ревью; картинки создаются через Codex imagegen; текст, графики и таблицы остаются редактируемыми; акценты делаются нативными фигурами без овальных свечений.
 
-## Ограничения
+## Рендер и проверка
 
-- Рендер для проверки идёт через PowerPoint на macOS (AppleScript). На Windows сборка работает, рендер — вручную: PowerPoint → «Сохранить как» PDF → `pdftoppm -png -r 96`.
-- После `claude plugin update ppt-master@ppt-master` или обновления preza запустите `/preza:setup` — он вернёт или обновит правила оформления в ppt-master.
-- Навыки preza запускаются только по явной команде (`/preza:…`, в Codex `$preza:…`): в Claude Code это записано в описании навыка, в Codex — политикой `allow_implicit_invocation: false` в `agents/openai.yaml`. Флага `disable-model-invocation` нет, поэтому вызов через инструмент `Skill` проходит без ошибки и строка состояния (claude-hud) показывает навык.
+```sh
+python -X utf8 <PREZA>/skills/preza/scripts/render_pptx.py <deck.pptx> <new-render-directory>
+```
 
-## Участие
+Windows: PowerPoint COM открывает отдельную копию с отключёнными макросами, экспортирует PDF, включает скрытые страницы только в копии и сохраняет исходный файл и уже открытые презентации. macOS: сохраняется прежний путь AppleScript через `render_pptx.sh`. Нужны локальный PowerPoint и Poppler; Linux не поддерживает эталонный рендер. Непустой каталог результата не перезаписывается.
 
-Ошибки и предложения — в [issues](https://github.com/Inhibit0r/preza/issues), правки — pull request'ом.
+После рендера осматриваются все страницы, сверяются шрифты и числа. Рендер показывает итоговые кадры, но не доказывает правильность воспроизведения анимации: её смотрят в PowerPoint. Проверки Windows и ролей покрыты тестами; живой прогон macOS выполняется на Mac.
 
-## Лицензия
+## Проверки разработки
 
-[MIT](LICENSE). Зависимости распространяются под лицензиями своих авторов.
+```sh
+python -X utf8 -m unittest discover -s tests -v
+python -X utf8 skills/setup/scripts/doctor.py --selftest
+python -X utf8 skills/deck-house-rules/scripts/patch_ppt_master.py --selftest
+```
+
+Тесты проверяют исходное окружение, симметричные роли, приоритет локальных адаптаций, изоляцию MCP текущего клиента и защиту файлов рендера. Полный контрольный маршрут дополнительно требует реальных CLI, imagegen, PPT Master и PowerPoint.
+
+## Участие и лицензия
+
+Ошибки — [issues](https://github.com/Inhibit0r/preza/issues), изменения — pull request. [MIT](LICENSE); зависимости распространяются по своим лицензиям.

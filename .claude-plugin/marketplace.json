@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "preza",
-      "description": "Презентация под ключ: ppt-master для нативного PPTX, Codex для ревью и картинок, речь в Word по слайдам.",
+      "description": "Preza для ведущего Claude Code или Codex; независимое ревью противоположного провайдера, нативный PPTX и PowerPoint Windows/macOS.",
       "source": "./",
       "category": "productivity"
     }

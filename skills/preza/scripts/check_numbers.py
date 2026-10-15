@@ -20,14 +20,14 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
 metrics_file = root / "data/metrics.json"  # нет расчётов — нет файла
-metrics = json.loads(metrics_file.read_text()) if metrics_file.exists() else {}
-sources = (root / "data/sources.md").read_text()
+metrics = json.loads(metrics_file.read_text(encoding="utf-8")) if metrics_file.exists() else {}
+sources = (root / "data/sources.md").read_text(encoding="utf-8")
 claims = {
-    c["id"]: c for c in csv.DictReader((root / "data/claims.csv").open(), delimiter=";")
+    c["id"]: c for c in csv.DictReader((root / "data/claims.csv").open(encoding="utf-8"), delimiter=";")
 }
 usage = {
     int(r["slide"]): r["claims"]
-    for r in csv.DictReader((root / "data/usage.csv").open(), delimiter=";")
+    for r in csv.DictReader((root / "data/usage.csv").open(encoding="utf-8"), delimiter=";")
 }
 
 DATE = re.compile(
@@ -70,7 +70,7 @@ for slide, ids in usage.items():
         errors += [
             f"usage слайд {slide}: нет утверждения {i}"
             for i in ids.split(",")
-            if i not in claims
+            if i and i not in claims
         ]
 
 
@@ -122,7 +122,7 @@ def check_fragment(where, slide, text, context, require_context, report):
 
 
 def check_script(path, report):
-    text = Path(path).read_text()
+    text = Path(path).read_text(encoding="utf-8")
     parts = re.split(r"^## Слайд (\d+)\..*$", text, flags=re.M)
     for i in range(1, len(parts), 2):
         slide = int(parts[i])
@@ -169,7 +169,7 @@ def check_pptx(path, report):
     for n, slide in enumerate(Presentation(path).slides, start=1):
         frags = slide_fragments(slide.shapes)
         whole = "\n".join(frags)
-        # ponytail: на слайде контекст = весь текст слайда; подписи без контекста сверяет аудит Codex по отчёту
+        # shortcut: контекст — весь слайд; смысл подписей проверяется при визуальном аудите.
         for frag in frags:
             check_fragment(f"{path} слайд {n}", n, frag, whole, False, report)
 
@@ -187,7 +187,7 @@ if __name__ == "__main__":
         check_pptx(a.pptx, report)
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True)
-        Path(a.report).write_text("\n".join(report) + "\n")
+        Path(a.report).write_text("\n".join(report) + "\n", encoding="utf-8")
     print(
         "claims:",
         len(claims),
