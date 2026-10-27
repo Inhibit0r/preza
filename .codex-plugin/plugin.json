@@ -1,7 +1,7 @@
 {
   "name": "preza",
-  "version": "1.1.3",
-  "description": "Презентация под ключ: маршрут из блоков под задачу, сборка нативного PPTX через ppt-master, ревью и картинки через Codex.",
+  "version": "1.3.5",
+  "description": "Презентация под ключ из Claude Code или Codex: маршрут по окружению, независимое ревью, нативный PPTX и рендер PowerPoint.",
   "author": {
     "name": "Inhibit0r",
     "url": "https://github.com/Inhibit0r"
@@ -9,15 +9,24 @@
   "homepage": "https://github.com/Inhibit0r/preza",
   "repository": "https://github.com/Inhibit0r/preza",
   "license": "MIT",
-  "keywords": ["presentation", "pptx", "powerpoint", "ppt-master", "codex", "slides"],
+  "keywords": [
+    "presentation",
+    "pptx",
+    "powerpoint",
+    "ppt-master",
+    "codex",
+    "slides"
+  ],
   "skills": "./skills/",
   "interface": {
     "displayName": "preza",
     "shortDescription": "Презентация под ключ",
-    "longDescription": "Собирает презентацию маршрутом из блоков: факты, история, облик, сборка и проверка. Нативный PPTX через ppt-master, ревью и картинки через Codex, речь в Word по слайдам.",
+    "longDescription": "Презентация под ключ из Claude Code или Codex: маршрут по окружению, независимое ревью, нативный PPTX и рендер PowerPoint.",
     "developerName": "Inhibit0r",
     "category": "Productivity",
-    "capabilities": ["Instructions"],
+    "capabilities": [
+      "Instructions"
+    ],
     "websiteURL": "https://github.com/Inhibit0r/preza",
     "defaultPrompt": [
       "$preza:preza Сделай доклад на 6 минут про рынок и ценовую политику компании X.",

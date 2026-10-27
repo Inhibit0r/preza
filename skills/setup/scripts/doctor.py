@@ -9,6 +9,7 @@
 Только стандартная библиотека. Код выхода 1 — не хватает обязательного.
 """
 
+import argparse
 import json
 import os
 import re
@@ -23,15 +24,15 @@ CLAUDE = HOME / ".claude"
 CODEX = Path(os.environ.get("CODEX_HOME") or HOME / ".codex")
 MAC, WIN = sys.platform == "darwin", os.name == "nt"
 PY = "python" if WIN else "python3"
-PLUGIN_SKILLS = Path(__file__).resolve().parents[2]
-SKILL_DIRS = [CLAUDE / "skills", HOME / ".agents/skills", CODEX / "skills"]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "preza/scripts"))
+import runtime
+HOST = None
 # Обновления проверяются только у плагинов, от которых зависит preza. Официальный маркетплейс собран
 # из чужих репозиториев: его коммит с установленным плагином не сравнить.
 RELATED = {
     "preza",
     "ppt-master",
     "frontend-slides",
-    "claudex-loop",
     "document-skills",
     "avoid-ai-writing-russian",
     "to-md",
@@ -57,46 +58,21 @@ def plugin_key(name):
 
 
 def skill_dir(name):
-    """Папка навыка: сначала в своём плагине, затем личная и в других плагинах."""
-    for d in (PLUGIN_SKILLS, *SKILL_DIRS):
-        if (d / name / "SKILL.md").is_file():
-            return d / name
-    for rec in installed_plugins().values():
-        root = Path(rec.get("installPath", ""))
-        for d in (root / name, root / "skills" / name):
-            if (d / "SKILL.md").is_file():
-                return d
-    return None
+    return runtime.find_skill(name, HOST, HOME)
 
 
 POINTER_FILES = ("SKILL.md", "references/image-generator.md", "references/executor-base.md")
 
 
-def rules_pointer_exists(skill_file, expected=None):
-    """Указатель ведёт к существующему SKILL.md, при наличии ожидаемого — с тем же содержимым.
-
-    Сравнивается содержимое, а не путь: копии preza в Claude, Codex и клоне равноценны.
-    """
-    for line in skill_file.read_text(encoding="utf-8").splitlines():
-        if "deck-house-rules" in line:
-            for target in re.findall(r"`([^`]+)`", line):
-                try:
-                    path = Path(target).expanduser()
-                except RuntimeError:
-                    continue
-                if (
-                    path.name == "SKILL.md"
-                    and path.is_file()
-                    and (expected is None or path.read_bytes() == expected.read_bytes())
-                ):
-                    return True
-    return False
+POINTER = ("(deck-house-rules)", "preza:deck-house-rules")  # единый источник текста указателей — форк ppt-master
+FORK, FORK_WORKFLOW = "Inhibit0r/ppt-master", "sync-upstream.yml"
 
 
-def rules_installed(pm, expected=None):
-    """Указатели во всех трёх файлах ppt-master: прерванный патч не считается выполненным."""
+def rules_installed(pm):
+    """Указатели форка во всех трёх файлах ppt-master: строка с маркером и именем навыка."""
     return all(
-        (pm / rel).is_file() and rules_pointer_exists(pm / rel, expected)
+        (pm / rel).is_file()
+        and any(all(m in line for m in POINTER) for line in (pm / rel).read_text(encoding="utf-8").splitlines())
         for rel in POINTER_FILES
     )
 
@@ -119,12 +95,49 @@ def missing_packages(req_file):
     return missing
 
 
+def git_url(value):
+    """owner/repo → https://github.com/owner/repo.git; полный адрес — как есть."""
+    if value and re.fullmatch(r"[\w.-]+/[\w.-]+", value):
+        return f"https://github.com/{value}.git"
+    return value
+
+
 def market_url(entry):
     """git-адрес маркетплейса из known_marketplaces.json или None."""
     src = (entry or {}).get("source", {})
     if src.get("source") == "github" and src.get("repo"):
-        return f"https://github.com/{src['repo']}.git"
+        return git_url(src["repo"])
     return src.get("url")
+
+
+def safe_source(url, ref):
+    """Только https-адрес и ветка/тег без пробелов и ведущего «-»: значения не становятся опциями git."""
+    return bool(url and re.fullmatch(r"https://[\w.-]+/[\w./~-]+", url)
+                and re.fullmatch(r"[A-Za-z0-9._/][A-Za-z0-9._/-]*", ref or ""))
+
+
+def market_plugins(market):
+    """Имена плагинов маркетплейса по его клону (маркетплейс удаляется, только если в нём один ppt-master)."""
+    data = load_json(CLAUDE / f"plugins/marketplaces/{market}/.claude-plugin/marketplace.json")
+    return [p.get("name") for p in data.get("plugins", [])]
+
+
+def inside_path(path, root):
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def plugin_source(market, name):
+    """(url, ref) источника плагина из marketplace.json клона маркетплейса — для git-subdir/github/url."""
+    data = load_json(CLAUDE / f"plugins/marketplaces/{market}/.claude-plugin/marketplace.json")
+    for plugin in data.get("plugins", []):
+        src = plugin.get("source")
+        if plugin.get("name") == name and isinstance(src, dict) and src.get("source") in ("git-subdir", "github", "url"):
+            return git_url(src.get("url") or src.get("repo")), src.get("ref") or "HEAD"
+    return None
 
 
 def run(cmd, timeout=15):
@@ -135,11 +148,28 @@ def run(cmd, timeout=15):
         return 1, str(e)
 
 
-def mcp_names():
+def mcp_names(host=None):
+    host = runtime.resolve_host(host or HOST)
+    if host == "codex":
+        path = CODEX / "config.toml"
+        if not path.is_file():
+            return set()
+        try:
+            import tomllib
+        except ImportError:  # Python 3.10 remains supported for Claude and CLI-backed Codex discovery.
+            cli = shutil.which("codex")
+            code, text = run([cli, "mcp", "list", "--json"]) if cli else (1, "")
+            rows = json.loads(text) if code == 0 else []
+            return {r["name"].lower() for r in rows if r.get("enabled", True)}
+        servers = tomllib.loads(path.read_text(encoding="utf-8")).get("mcp_servers", {})
+        return {name.lower() for name, row in servers.items() if row.get("enabled", True)}
     d = load_json(HOME / ".claude.json")
     names = set(d.get("mcpServers", {}))
-    for proj in d.get("projects", {}).values():
-        names |= set(proj.get("mcpServers", {}))
+    # MCP from another project is not evidence for the current project.
+    cwd = os.path.normcase(str(Path.cwd().resolve()))
+    for project, config in d.get("projects", {}).items():
+        if os.path.normcase(str(Path(project).resolve())) == cwd:
+            names |= set(config.get("mcpServers", {}))
     return {n.lower() for n in names}
 
 
@@ -167,7 +197,10 @@ def powerpoint_found():
     return False
 
 
-def checks():
+def checks(host=None):
+    global HOST
+    HOST = runtime.resolve_host(host or HOST)
+    host = HOST
     """Список проверок: группа, компонент, есть ли, подробность, команды, ручные шаги."""
     out = []
 
@@ -186,12 +219,6 @@ def checks():
     core, block = "Ядро", "По блокам"
     add(
         core,
-        "Claude Code CLI",
-        shutil.which("claude"),
-        manual="установите Claude Code: https://code.claude.com",
-    )
-    add(
-        core,
         "Python ≥ 3.10",
         sys.version_info >= (3, 10),
         f"{sys.version.split()[0]} ({sys.executable})",
@@ -199,13 +226,29 @@ def checks():
     )
 
     pm = skill_dir("ppt-master")
-    add(
-        core,
-        "ppt-master (плагин)",
-        pm,
-        str(pm or ""),
-        install_plugin("hugohe3/ppt-master", "ppt-master"),
-    )
+    keys = [k for k in installed_plugins() if k.split("@")[0] == "ppt-master"]
+    # Codex без Claude: файлы форка кладутся в общую библиотеку навыков, команды claude ему не подходят
+    codex_manual = ("клонируйте ветку preza форка https://github.com/Inhibit0r/ppt-master и скопируйте "
+                    "skills/ppt-master в ~/.agents/skills/ppt-master (на машине со стеком ~/.agents/stack — через install.py run; "
+                    "если потом поставите ppt-master@preza в Claude, эту копию уберите: она перекроет форк)")
+    fork_fix = install_plugin("Inhibit0r/preza", "ppt-master", "preza") if host == "claude" else []
+    add(core, "ppt-master (плагин)", pm, str(pm or ""), fork_fix, manual="" if host == "claude" else codex_manual)
+    # Claude ставит ppt-master из маркетплейса preza; Codex читает найденные файлы — ему достаточно указателей форка
+    source = core if host == "claude" else block
+    fork = installed_plugins().get("ppt-master@preza", {}).get("installPath")
+    add(source, "ppt-master из маркетплейса preza (форк)", "ppt-master@preza" in keys,
+        "ppt-master@preza" if "ppt-master@preza" in keys else f"установлено: {', '.join(keys) or 'нет'}", fork_fix,
+        manual="" if host == "claude" else codex_manual)
+    old = [k for k in keys if k != "ppt-master@preza"]
+    removal = [f"claude plugin uninstall {k}" for k in old] + [
+        f"claude plugin marketplace remove {m}" for m in {k.split("@")[1] for k in old} if market_plugins(m) == ["ppt-master"]]
+    add(source, "без старого источника ppt-master", not old, ", ".join(old), removal if host == "claude" else [],
+        manual=("на машине со стеком ~/.agents/stack: после удаления — stack.py sync и ручная правка манифеста; установка — install.py run"
+                if host == "claude" else "в Claude Code: " + "; ".join(removal)))
+    dev = os.environ.get("PREZA_PPT_MASTER")  # клон форка при разработке — не «личная копия»
+    if fork and pm and not inside_path(pm, Path(fork)) and not (dev and inside_path(pm, Path(dev))):
+        add(source, "ppt-master берётся из форка", False, f"перекрыт копией {pm}",
+            manual=f"уберите или переименуйте личную копию {pm}: она перекрывает ppt-master@preza")
     if pm:
         req = pm / "requirements.txt"
         miss = missing_packages(req) if req.is_file() else []
@@ -217,46 +260,30 @@ def checks():
             ", ".join(miss) or "все на месте",
             [f'{PY} -m pip install --user{extra} -r "{req}"'],
         )
-        dhr = skill_dir("deck-house-rules")
-        patched = rules_installed(pm, dhr / "SKILL.md" if dhr else None)
-        add(
-            core,
-            "Правила deck-house-rules в ppt-master",
-            patched,
-            fix=[f'{PY} "{dhr / "scripts/patch_ppt_master.py"}"'] if dhr else [],
-            manual=""
-            if dhr
-            else "установите плагин preza — в нём навык deck-house-rules",
-        )
+        add(source, "Указатели deck-house-rules в ppt-master", rules_installed(pm),
+            "указатели приходят из форка; копия без них — не из маркетплейса preza", fork_fix,
+            manual="" if host == "claude" else codex_manual)
 
-    add(
-        core,
-        "claudex-loop (ревью с Codex)",
-        skill_dir("claudex-loop"),
-        fix=install_plugin("chaseai-yt/claudex-loop", "claudex-loop"),
-    )
-    codex = shutil.which("codex")
-    add(core, "Codex CLI", codex, fix=["npm install -g @openai/codex"])
-    if codex:
-        code, text = run(["codex", "login", "status"])
-        add(
-            core,
-            "Codex: вход выполнен",
-            code == 0,
-            text.splitlines()[-1] if text else "",
-            manual="выполните в терминале: codex login",
-        )
-        add(
-            core,
-            "Codex: навык $imagegen",
-            (CODEX / "skills/.system/imagegen").is_dir(),
-            fix=["npm install -g @openai/codex@latest"],
-        )
+    add(block, "doubt-driven-development (ревью, необязателен)", skill_dir("doubt-driven-development"),
+        "рецензент — свежий субагент хоста; без навыка — промпт из references/hosts.md",
+        manual="необязательно: навык doubt-driven-development (addyosmani/agent-skills)")
+    if host == "claude":  # картинки из Claude делает codex exec с $imagegen
+        cli = shutil.which("codex")
+        add(block, "Codex CLI (картинки, Облик)", cli,
+            manual="установите Codex CLI: картинки генерирует codex exec с $imagegen")
+        if cli:
+            code, _ = run([cli, "login", "status"])
+            add(block, "Codex: вход (картинки, Облик)", code == 0,
+                "вход подтверждён" if code == 0 else "вход не подтверждён",
+                manual="выполните codex login")
+    add(block, "Codex imagegen (Облик)", (CODEX / "skills/.system/imagegen").is_dir(),
+        "наличие инструкции; инструмент генерации проверяется в активной сессии",
+        manual="используйте сессию Codex с фактически доступным imagegen")
     add(
         core,
         "Microsoft PowerPoint (рендер)",
         powerpoint_found(),
-        "render_pptx.sh работает только на macOS" if not MAC else "",
+        "scripts/render_pptx.py: PowerPoint COM" if WIN else "scripts/render_pptx.py: AppleScript",
         manual="установите Microsoft PowerPoint (Office 2021 / Microsoft 365)",
     )
     poppler = shutil.which("pdftoppm") and shutil.which("pdffonts")
@@ -272,7 +299,7 @@ def checks():
         manual="установите poppler и добавьте его bin в PATH" if WIN else "",
     )
 
-    mcp = mcp_names()
+    mcp = mcp_names(host)
     for name, url, var in (
         ("tavily", "https://mcp.tavily.com/mcp", "TAVILY_API_KEY"),
         ("firecrawl", "https://mcp.firecrawl.dev/v2/mcp", "FIRECRAWL_API_KEY"),
@@ -282,12 +309,11 @@ def checks():
             block,
             f"{name.capitalize()} MCP (Факты, Референсы)",
             ok,
-            fix=[
-                f"claude mcp add -s user -t http {name} {url} -H 'Authorization: Bearer ${{{var}}}'"
-            ],
-            manual=f"ключ положите в переменную {var} в профиле оболочки",
+            detail=f"регистрация {host}; вызов и авторизацию проверяйте в активной сессии",
+            fix=[f"claude mcp add -s user -t http {name} {url} -H 'Authorization: Bearer ${{{var}}}'"] if host == "claude" else [],
+            manual=f"подключите {name} к {host}; ключи и OAuth остаются локально",
         )
-        if ok and not os.environ.get(var):
+        if host == "claude" and ok and not os.environ.get(var):
             out[-1]["detail"] = (
                 f"{var} не видна этому процессу — если MCP берёт ключ из неё, проверьте профиль"
             )
@@ -345,11 +371,18 @@ def updates():
     found = []
     for key, rec in installed_plugins().items():
         name, _, market = key.partition("@")
-        url = market_url(markets.get(market))
         sha = rec.get("gitCommitSha")
-        if name not in RELATED or market in NO_UPDATE_CHECK or not (url and sha):
+        if name not in RELATED or market in NO_UPDATE_CHECK or not sha:
             continue
-        code, text = run(["git", "ls-remote", url, "HEAD"], timeout=8)
+        # плагин из другого репозитория (git-subdir: ppt-master@preza из форка) сравнивается со своим источником
+        url, ref = plugin_source(market, name) or (
+            market_url(markets.get(market)), markets.get(market, {}).get("source", {}).get("ref") or "HEAD")
+        if not url:
+            continue
+        if not safe_source(url, ref):  # адрес и ветка приходят из чужого marketplace.json
+            continue
+        code, text = run(["git", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+                          "ls-remote", "--", url, ref], timeout=8)
         head = text.split()[0] if code == 0 and text else ""
         if head and head != sha:
             found.append(
@@ -362,6 +395,37 @@ def updates():
                 }
             )
     return found
+
+
+def fork_sync():
+    """Состояние синхронизации форка: (ok, подробность); None — gh недоступен или GitHub не ответил."""
+    from datetime import datetime, timezone
+
+    gh = shutil.which("gh")
+    if not gh:
+        return None
+    code, state = run([gh, "api", f"repos/{FORK}/actions/workflows/{FORK_WORKFLOW}", "--jq", ".state"], timeout=10)
+    if code:
+        return None
+    if state != "active":
+        return False, f"workflow {state}: gh workflow enable {FORK_WORKFLOW} --repo {FORK}"
+    # прогон с конфликтом или красным контрактом тоже success — сбой виден по открытому issue ветки preza
+    code_issues, stuck = run([gh, "issue", "list", "--repo", FORK, "--state", "open", "--json", "title",
+                              "--jq", '.[] | select(.title | startswith("sync preza ")) | .title'], timeout=10)
+    if code_issues:
+        return None  # без списка issue застрявшую синхронизацию не отличить от рабочей
+    if stuck.strip():
+        return False, f"синхронизация остановлена: {stuck.splitlines()[0]} (tools/README.md форка)"
+    code_runs, last = run([gh, "api", f"repos/{FORK}/actions/workflows/{FORK_WORKFLOW}/runs?status=success&per_page=1",
+                           "--jq", ".workflow_runs[0].updated_at // empty"], timeout=10)
+    if code_runs:
+        return None
+    try:
+        when = datetime.fromisoformat(last.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return False, "успешных прогонов нет"
+    age = (datetime.now(timezone.utc) - when).days
+    return age <= 14, f"последний успешный прогон {last[:10]} ({age} дн.)"
 
 
 def report(items, ups):
@@ -384,7 +448,7 @@ def report(items, ups):
     if cmds:
         print("Команды для недостающего и обновлений:")
         print("\n".join(f"  {cmd}" for cmd in dict.fromkeys(cmds)))
-        print("  После установки плагинов — /reload-plugins в Claude Code.\n")
+        print("  После установки: Claude — /reload-plugins; Codex — новый сеанс.\n")
     if manual:
         print("Вручную:")
         print("\n".join(f"  - {m}" for m in manual))
@@ -395,9 +459,9 @@ def selftest():
     from unittest.mock import patch
 
     with TemporaryDirectory() as tmp:
-        root = Path(tmp)
+        root = Path(tmp).resolve()  # macOS: /var -> /private/var
         plugin = root / "plugin/skills"
-        personal = root / "personal"
+        personal = root / ".agents/skills"
         for parent, name in (
             (plugin, "deck-house-rules"),
             (personal, "deck-house-rules"),
@@ -406,43 +470,32 @@ def selftest():
             skill = parent / name
             skill.mkdir(parents=True)
             (skill / "SKILL.md").write_text("fixture", encoding="utf-8")
-        with patch.dict(globals(), PLUGIN_SKILLS=plugin, SKILL_DIRS=[personal]):
+        with patch.object(runtime, "SKILLS", plugin), patch.dict(globals(), HOME=root):
             assert skill_dir("deck-house-rules") == plugin / "deck-house-rules"
             assert skill_dir("selftest-fallback") == personal / "selftest-fallback"
 
-        pm_skill = root / "SKILL.md"
-        rules = plugin / "deck-house-rules/SKILL.md"
-        for text, expected in (
-            ("deck-house-rules", False),
-            (f"ordinary link `{pm_skill}`", False),
-            (f"deck-house-rules `{root / 'missing/SKILL.md'}`", False),
-            ("deck-house-rules `~nonexistentuser_preza_selftest/SKILL.md`", False),
-            (f"deck-house-rules `{rules}` and `$imagegen`", True),
-            ("deck-house-rules `~/plugin/skills/deck-house-rules/SKILL.md`", True),
-        ):
-            pm_skill.write_text(text, encoding="utf-8")
-            with patch.dict(os.environ, HOME=tmp, USERPROFILE=tmp):
-                assert rules_pointer_exists(pm_skill) is expected, text
-                assert rules_pointer_exists(pm_skill, rules) is expected, text
-        with patch.object(Path, "expanduser", side_effect=RuntimeError):
-            assert not rules_pointer_exists(pm_skill, rules)
-        other = personal / "deck-house-rules/SKILL.md"
-        pm_skill.write_text(f"deck-house-rules `{other}`", encoding="utf-8")
-        assert rules_pointer_exists(
-            pm_skill, rules
-        )  # та же версия правил в другой установке
-        other.write_text("older rules", encoding="utf-8")
-        assert rules_pointer_exists(pm_skill)
-        assert not rules_pointer_exists(pm_skill, rules)
         pm = root / "pm"
         for rel in POINTER_FILES:
             (pm / rel).parent.mkdir(parents=True, exist_ok=True)
-            (pm / rel).write_text(f"deck-house-rules `{rules}`", encoding="utf-8")
-        assert rules_installed(pm, rules)
-        (pm / POINTER_FILES[2]).write_text("no pointer", encoding="utf-8")
-        assert not rules_installed(pm, rules)  # патч прервался на третьем файле
-        (pm / POINTER_FILES[2]).write_text(f"deck-house-rules `{other}`", encoding="utf-8")
-        assert not rules_installed(pm, rules)  # третий указатель на устаревшие правила
+            (pm / rel).write_text("# T\n\n> rule (deck-house-rules): `preza:deck-house-rules`\n", encoding="utf-8")
+        assert rules_installed(pm)
+        (pm / POINTER_FILES[2]).write_text("mentions deck-house-rules only", encoding="utf-8")
+        assert not rules_installed(pm)  # нет маркера в третьем файле
+    assert git_url("Inhibit0r/ppt-master") == "https://github.com/Inhibit0r/ppt-master.git"
+    assert safe_source("https://github.com/a/b.git", "preza") and safe_source("https://x/y.git", "HEAD")
+    responses = {"state": (0, "active"), "issue": (0, ""), "runs": (1, "HTTP 502: Bad Gateway")}
+    pick = lambda cmd, timeout=15: responses["issue" if "issue" in cmd else "runs" if any("runs" in c for c in cmd) else "state"]  # noqa: E731
+    with patch.object(shutil, "which", return_value="/usr/bin/gh"), patch.dict(globals(), run=pick):
+        assert fork_sync() is None  # GitHub не ответил — не падать и не выдумывать вывод
+        responses["runs"] = (0, "")
+        assert fork_sync() == (False, "успешных прогонов нет")
+        responses["issue"] = (0, "sync preza v6.8.0: conflict")
+        assert fork_sync()[0] is False
+        responses.update(issue=(1, "HTTP 502"), runs=(0, "2099-01-01T00:00:00Z"))
+        assert fork_sync() is None  # сбой списка issue — не «зелёный»
+    assert not safe_source("--upload-pack=touch x", "HEAD") and not safe_source("https://github.com/a/b.git", "--output=x")
+    assert not safe_source("ext::sh -c x", "HEAD") and not safe_source("file:///tmp/r", "HEAD")
+    assert git_url("https://x/y.git") == "https://x/y.git"
     assert req_name("python-pptx>=0.6.21") == "python-pptx"
     assert (
         req_name("uharfbuzz>=0.50.0 ; sys_platform != 'win32'  # note") == "uharfbuzz"
@@ -466,17 +519,32 @@ if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
         sys.exit()
-    items = checks()
-    ups = [] if "--offline" in sys.argv else updates()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", choices=["claude", "codex"])
+    parser.add_argument("--offline", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    try:
+        HOST = runtime.resolve_host(args.host)
+        items = checks(HOST)
+    except (OSError, ValueError) as error:
+        if args.json:
+            print(json.dumps({"required_ok": False, "error": str(error)}, ensure_ascii=False))
+        else:
+            print(str(error), file=sys.stderr)
+        sys.exit(2)
+    ups = [] if args.offline else updates()
+    sync = None if args.offline else fork_sync()
+    if not args.offline:
+        if sync is None:
+            sync = (False, "не проверено: gh недоступен или GitHub не ответил")
+        items.append({"group": "По блокам", "name": "синхронизация форка ppt-master", "ok": sync[0],
+                      "detail": sync[1], "fix": [], "manual": "" if sync[0] else f"проверьте Actions {FORK}"})
     required_ok = all(c["ok"] for c in items if c["group"] == "Ядро")
-    if "--json" in sys.argv:
-        print(
-            json.dumps(
-                {"required_ok": required_ok, "checks": items, "updates": ups},
-                ensure_ascii=False,
-                indent=1,
-            )
-        )
+    if args.json:
+        print(json.dumps({"required_ok": required_ok, "runtime": runtime.context(HOST),
+                          "checks": items, "updates": ups}, ensure_ascii=False, indent=1))
     else:
+        print(f"Хост: {HOST}; независимый рецензент: {runtime.roles(HOST)['reviewer']}")
         report(items, ups)
     sys.exit(0 if required_ok else 1)

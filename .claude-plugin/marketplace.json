@@ -9,8 +9,25 @@
   "plugins": [
     {
       "name": "preza",
-      "description": "Презентация под ключ: ppt-master для нативного PPTX, Codex для ревью и картинок, речь в Word по слайдам.",
+      "description": "Preza для ведущего Claude Code или Codex; независимое ревью субагентом, картинки Codex, нативный PPTX и PowerPoint Windows/macOS.",
       "source": "./",
+      "category": "productivity"
+    },
+    {
+      "name": "ppt-master",
+      "description": "PPT Master (Hugo He, MIT) из форка Inhibit0r/ppt-master: релизы upstream плюс указатели на правила preza, синхронизация по тегам с проверкой контракта.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Inhibit0r/ppt-master.git",
+        "path": "skills",
+        "ref": "preza"
+      },
+      "author": {
+        "name": "Hugo He",
+        "url": "https://github.com/hugohe3"
+      },
+      "homepage": "https://github.com/hugohe3/ppt-master",
+      "license": "MIT",
       "category": "productivity"
     }
   ]
