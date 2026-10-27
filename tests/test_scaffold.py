@@ -14,8 +14,12 @@ spec.loader.exec_module(scaffold)
 
 
 def run(*args):
+    # как в hosts.md: Python-команды с -X utf8, иначе на Windows вывод в cp1252
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True
+        [sys.executable, "-X", "utf8", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
 
 

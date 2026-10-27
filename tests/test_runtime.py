@@ -30,7 +30,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(runtime.roles('claude')['image_mode'], 'codex-exec')
         ctx = runtime.context('claude')
         self.assertNotIn('claudex_runner', ctx)
-        self.assertTrue(ctx['deck_house_rules'].endswith('deck-house-rules/SKILL.md'))
+        self.assertEqual(Path(ctx['deck_house_rules']).parts[-2:], ('deck-house-rules', 'SKILL.md'))
 
     def test_ppt_master_env_override_and_preza_marketplace_preferred(self):
         with tempfile.TemporaryDirectory() as tmp:
