@@ -1,6 +1,6 @@
 # preza
 
-Презентации в редактируемом PowerPoint для Codex и Claude Code. Начальная сессия ведёт работу, независимое ревью делает свежий субагент той же среды, изображения создаёт Codex `$imagegen`. [PPT Master](https://github.com/hugohe3/ppt-master) собирает SVG в нативный PPTX. Речь в Word и анимация добавляются по запросу.
+Презентации в редактируемом PowerPoint для Codex и Claude Code. Начальная сессия ведёт работу, независимое ревью делает свежий субагент той же среды, изображения создаёт Codex `$imagegen`. [PPT Master](https://github.com/hugohe3/ppt-master) собирает SVG в нативный PPTX. Речь в Word — по ответу на вопрос, который preza задаёт всегда; анимация — по запросу.
 
 ## Быстрый старт
 
@@ -13,6 +13,8 @@ codex plugin add preza@preza
 
 Начните новую сессию, вызовите `$preza:setup`, затем `$preza:preza` с задачей.
 
+PPT Master без Claude Code: ветка `preza` форка — `git clone -b preza https://github.com/Inhibit0r/ppt-master`, папка `skills/ppt-master` → `~/.agents/skills/ppt-master`; `$preza:setup` проверит.
+
 Marketplace использует файлы своего выбранного checkout: `codex plugin marketplace add Inhibit0r/preza --ref <ветка-или-тег>` сохраняет выбранную версию и не переадресует установку плагина обратно на `main`.
 
 Claude Code:
@@ -24,8 +26,6 @@ claude plugin install ppt-master@preza
 ```
 
 В сессии выполните `/reload-plugins`, `/preza:setup`, затем `/preza:preza` с задачей. Навыки остаются ручными: политика Codex `allow_implicit_invocation: false` сохранена; Claude использует описание и настоящий Skill tool при его наличии.
-
-На устройствах с управляемым переносимым стеком используйте его post-install обработчик вместо прямой установки.
 
 ## Как это работает
 
@@ -49,6 +49,19 @@ claude plugin install ppt-master@preza
 3. **Маршрут.** Блоки по брифу (таблица «Маршрут») с независимым ревью по уровню; картинки — Codex `$imagegen` по правилу без генеративного слопа.
 4. **Проверка.** Рендер PowerPoint и осмотр каждого слайда, детекторы пустот и служебных строк титула, сверка чисел; при речи — antiplagiat и Word.
 5. **Итог.** Сдача в корне папки задания, абсолютные пути, ваши явные решения — в память. Вернётесь к работе — preza сначала заберёт ваши ручные правки Word.
+
+### Уровни проработки
+
+| Уровень | Когда | Чем отличается |
+|---|---|---|
+| Срочный | «срочно», «быстро», «за 15 минут» | профиль Quick Generate PPT Master: без согласований и ревью, картинки и речь параллельно со страницами |
+| Обычный | по умолчанию, типовая учебная работа | один раунд ревью раскадровки, visual-review пачками |
+| Усиленный | «важно», «защита», «экзамен», «на оценку» | три направления облика на выбор, ревью плана картинок, второй раунд рендера |
+| Полный дизайн | «с нуля», «дизайн», «референсы» | референсы и эскизы направлений, до трёх раундов ревью |
+
+На любом уровне: рендер PowerPoint и осмотр каждого слайда, детекторы пустот и служебных строк, сверка чисел и условия задания, при речи — antiplagiat перед сдачей. Уровень называется первой строкой — его можно сменить словом.
+
+**Без вас.** Скажите «меня не задействовать», «сделай сам» или «сплю»: preza задаст недостающие вопросы одним пакетом в начале, дальше решит сама и запишет решения в `PLAN.md`; итог начнётся со строки «Решено без вас».
 
 Сессия без `/preza` узнаёт структуру из блока, который preza дописывает в `CLAUDE.md` предмета. Подробно — [layout.md](skills/preza/references/layout.md). Старые работы до 1.3.5 продолжаются на месте по старым путям.
 
@@ -127,6 +140,10 @@ python -X utf8 skills/setup/scripts/doctor.py --selftest
 python -X utf8 skills/preza/scripts/check_deck.py --selftest
 python -X utf8 skills/preza/scripts/check_svg.py --selftest
 python -X utf8 skills/preza/scripts/check_speech.py --selftest
+python -X utf8 skills/preza/scripts/scaffold.py --selftest
+python -X utf8 skills/preza/scripts/stoplist.py --selftest
+python -X utf8 skills/preza/scripts/sync_notes.py --selftest
+python -X utf8 skills/preza/scripts/clean_deck.py --selftest
 ```
 
 Разработка с клоном форка: `PREZA_PPT_MASTER=<клон>/skills/ppt-master claude --plugin-dir <клон preza> --plugin-dir <клон>/skills`.
@@ -135,4 +152,4 @@ python -X utf8 skills/preza/scripts/check_speech.py --selftest
 
 ## Участие и лицензия
 
-Ошибки — [issues](https://github.com/Inhibit0r/preza/issues), изменения — pull request. [MIT](LICENSE); зависимости распространяются по своим лицензиям.
+Изменения по версиям — [релизы](https://github.com/Inhibit0r/preza/releases). Ошибки — [issues](https://github.com/Inhibit0r/preza/issues), изменения — pull request. [MIT](LICENSE); зависимости распространяются по своим лицензиям.
