@@ -1,0 +1,33 @@
+name: tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        python: ["3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install python-pptx==1.0.2
+      # те же команды, что в README в разделе о проверке
+      - run: python -X utf8 -m unittest discover -s tests -v
+      - name: selftest
+        run: |
+          for s in skills/setup/scripts/doctor.py skills/preza/scripts/{check_deck,check_svg,check_speech,scaffold,stoplist,sync_notes,clean_deck}.py; do
+            echo "== $s"
+            python -X utf8 "$s" --selftest
+          done
