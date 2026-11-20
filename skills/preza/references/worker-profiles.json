@@ -1,0 +1,32 @@
+{
+  "model": "gpt-6.2-sol",
+  "levels": {
+    "Срочный": {
+      "research": "medium",
+      "image": "medium",
+      "speech": "medium",
+      "critic": "high"
+    },
+    "Обычный": {
+      "research": "high",
+      "design": "xhigh",
+      "image": "high",
+      "speech": "high",
+      "critic": "xhigh"
+    },
+    "Усиленный": {
+      "research": "high",
+      "design": "max",
+      "image": "xhigh",
+      "speech": "high",
+      "critic": "max"
+    },
+    "Полный дизайн": {
+      "research": "high",
+      "design": "max",
+      "image": "xhigh",
+      "speech": "high",
+      "critic": "max"
+    }
+  }
+}

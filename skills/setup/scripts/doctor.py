@@ -226,47 +226,80 @@ def checks(host=None):
     )
 
     pm = skill_dir("ppt-master")
-    keys = [k for k in installed_plugins() if k.split("@")[0] == "ppt-master"]
-    # Codex без Claude: файлы форка кладутся в общую библиотеку навыков, команды claude ему не подходят
-    codex_manual = ("клонируйте ветку preza форка https://github.com/Inhibit0r/ppt-master и скопируйте "
-                    "skills/ppt-master в ~/.agents/skills/ppt-master (на машине со стеком ~/.agents/stack — через install.py run; "
-                    "если потом поставите ppt-master@preza в Claude, эту копию уберите: она перекроет форк)")
-    fork_fix = install_plugin("Inhibit0r/preza", "ppt-master", "preza") if host == "claude" else []
-    add(core, "ppt-master (плагин)", pm, str(pm or ""), fork_fix, manual="" if host == "claude" else codex_manual)
-    # Claude ставит ppt-master из маркетплейса preza; Codex читает найденные файлы — ему достаточно указателей форка
-    source = core if host == "claude" else block
-    fork = installed_plugins().get("ppt-master@preza", {}).get("installPath")
-    add(source, "ppt-master из маркетплейса preza (форк)", "ppt-master@preza" in keys,
-        "ppt-master@preza" if "ppt-master@preza" in keys else f"установлено: {', '.join(keys) or 'нет'}", fork_fix,
-        manual="" if host == "claude" else codex_manual)
-    old = [k for k in keys if k != "ppt-master@preza"]
-    removal = [f"claude plugin uninstall {k}" for k in old] + [
-        f"claude plugin marketplace remove {m}" for m in {k.split("@")[1] for k in old} if market_plugins(m) == ["ppt-master"]]
-    add(source, "без старого источника ppt-master", not old, ", ".join(old), removal if host == "claude" else [],
-        manual=("на машине со стеком ~/.agents/stack: после удаления — stack.py sync и ручная правка манифеста; установка — install.py run"
-                if host == "claude" else "в Claude Code: " + "; ".join(removal)))
-    dev = os.environ.get("PREZA_PPT_MASTER")  # клон форка при разработке — не «личная копия»
-    if fork and pm and not inside_path(pm, Path(fork)) and not (dev and inside_path(pm, Path(dev))):
-        add(source, "ppt-master берётся из форка", False, f"перекрыт копией {pm}",
-            manual=f"уберите или переименуйте личную копию {pm}: она перекрывает ppt-master@preza")
+    codex_manual = (
+        "Запустите prepare_engine.py выбранным Python из skills/setup/scripts."
+    )
+    fork_fix = []
+    source = core
+    if host == "codex":
+        add(core, "ppt-master (плагин)", pm, str(pm or ""), manual=codex_manual)
+        add(
+            block,
+            "Orca для исполнителей Codex",
+            shutil.which("orca") and skill_dir("orchestration"),
+            "CLI и навык. Регистрация задачи подтверждается квитанцией Orca.",
+        )
+    else:
+        fork_fix = install_plugin("Inhibit0r/preza", "ppt-master", "preza")
+        add(core, "ppt-master (плагин)", pm, str(pm or ""), fork_fix)
+        plugins = installed_plugins()
+        keys = [k for k in plugins if k.split("@")[0] == "ppt-master"]
+        old = [k for k in keys if k != "ppt-master@preza"]
+        add(
+            core,
+            "ppt-master из маркетплейса preza (форк)",
+            "ppt-master@preza" in keys,
+            ", ".join(keys),
+            fork_fix,
+        )
+        removal = [f"claude plugin uninstall {k}" for k in old] + [
+            f"claude plugin marketplace remove {m}"
+            for m in {k.split("@")[1] for k in old}
+            if market_plugins(m) == ["ppt-master"]
+        ]
+        add(core, "без старого источника ppt-master", not old, ", ".join(old), removal)
+        fork = plugins.get("ppt-master@preza", {}).get("installPath")
+        dev = os.environ.get("PREZA_PPT_MASTER")
+        if (
+            fork
+            and pm
+            and not inside_path(pm, Path(fork))
+            and not (dev and inside_path(pm, Path(dev)))
+        ):
+            add(
+                core,
+                "ppt-master берётся из форка",
+                False,
+                str(pm),
+                manual="Проверьте источник установки.",
+            )
+
     if pm:
         req = pm / "requirements.txt"
-        miss = missing_packages(req) if req.is_file() else []
+        miss = missing_packages(req) if req.is_file() else ["requirements.txt отсутствует"]
         extra = " --break-system-packages" if MAC else ""
         add(
             core,
             "Python-пакеты ppt-master",
             not miss,
             ", ".join(miss) or "все на месте",
-            [f'{PY} -m pip install --user{extra} -r "{req}"'],
+            [f'{PY} -m pip install --user{extra} -r "{req}"']
+            if host == "claude"
+            else [],
+            manual=codex_manual if host == "codex" else "",
         )
         add(source, "Указатели deck-house-rules в ppt-master", rules_installed(pm),
             "указатели приходят из форка; копия без них — не из маркетплейса preza", fork_fix,
             manual="" if host == "claude" else codex_manual)
 
-    add(block, "doubt-driven-development (ревью, необязателен)", skill_dir("doubt-driven-development"),
-        "рецензент — свежий субагент хоста; без навыка — промпт из references/hosts.md",
-        manual="необязательно: навык doubt-driven-development (addyosmani/agent-skills)")
+    if host == "claude":
+        add(
+            block,
+            "doubt-driven-development (ревью, необязателен)",
+            skill_dir("doubt-driven-development"),
+            "рецензент — свежий субагент хоста; без навыка — промпт из references/hosts.md",
+            manual="необязательно: навык doubt-driven-development (addyosmani/agent-skills)",
+        )
     if host == "claude":  # картинки из Claude делает codex exec с $imagegen
         cli = shutil.which("codex")
         add(block, "Codex CLI (картинки, Облик)", cli,
@@ -317,6 +350,41 @@ def checks(host=None):
             out[-1]["detail"] = (
                 f"{var} не видна этому процессу — если MCP берёт ключ из неё, проверьте профиль"
             )
+    if host == "codex":
+        enabled = set()
+        try:
+            import tomllib
+        except ImportError:
+            pass
+        else:
+            config = CODEX / "config.toml"
+            if config.is_file():
+                plugins = tomllib.loads(config.read_text(encoding="utf-8")).get(
+                    "plugins", {}
+                )
+                enabled = {
+                    key.split("@", 1)[0]
+                    for key, value in plugins.items()
+                    if value.get("enabled", False)
+                }
+        for name, providers in (
+            ("frontend-slides", {"frontend-slides"}),
+            ("docx", {"document-skills", "documents"}),
+            ("antiplagiat", set()),
+            ("avoid-ai-writing-russian", set()),
+            ("grill-me", set()),
+            ("to-md", {"to-md"}),
+        ):
+            asset = skill_dir(name)
+            detected = bool(asset or enabled.intersection(providers))
+            add(
+                block,
+                name,
+                detected,
+                "Локальные файлы или включённый плагин. Для вызова сверьте skills/list.",
+            )
+        add(block, "Детектор aiw-ru", shutil.which("aiw-ru"), "Для речи")
+        return out
     add(
         block,
         "frontend-slides (Референсы)",
@@ -533,7 +601,7 @@ if __name__ == "__main__":
         else:
             print(str(error), file=sys.stderr)
         sys.exit(2)
-    ups = [] if args.offline else updates()
+    ups = updates() if HOST == "claude" and not args.offline else []
     sync = None if args.offline else fork_sync()
     if not args.offline:
         if sync is None:

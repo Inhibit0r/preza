@@ -22,12 +22,16 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.resolve_host('claude', {'CODEX_THREAD_ID': 'inherited'}), 'claude')
 
     def test_reviewer_is_host_subagent_and_images_stay_codex(self):
-        for host in ('codex', 'claude'):
-            r = runtime.roles(host)
-            self.assertEqual((r['reviewer'], r['coordinator'], r['image_provider']), (f'{host}-subagent', host, 'codex'))
-            self.assertEqual(r['review_skill'], 'doubt-driven-development')
-        self.assertEqual(runtime.roles('codex')['image_mode'], 'native-tool-if-available')
-        self.assertEqual(runtime.roles('claude')['image_mode'], 'codex-exec')
+        legacy = runtime.roles("claude")
+        self.assertEqual(legacy["reviewer"], "claude-subagent")
+        native = runtime.roles("codex", "Усиленный")
+        self.assertEqual(native["reviewer"], "orca-codex-worker")
+        self.assertEqual(native["worker_profiles"]["critic"]["effort"], "max")
+        self.assertEqual(
+            runtime.roles("codex", "Обычный")["worker_profiles"]["design"]["effort"],
+            "xhigh",
+        )
+        self.assertNotIn("model", native)
         ctx = runtime.context('claude')
         self.assertNotIn('claudex_runner', ctx)
         self.assertEqual(Path(ctx['deck_house_rules']).parts[-2:], ('deck-house-rules', 'SKILL.md'))
@@ -60,10 +64,11 @@ class RuntimeTests(unittest.TestCase):
             registry = home / '.claude/plugins/installed_plugins.json'
             registry.parent.mkdir(parents=True)
             registry.write_text(json.dumps({'plugins': {'ppt-master@pm': [{'scope': 'user', 'installPath': str(current.parent)}]}}), encoding='utf-8')
-            self.assertEqual(runtime.find_skill('ppt-master', 'codex', home), current)
-            shared = home / '.agents/skills/ppt-master'
-            shared.mkdir(parents=True); (shared / 'SKILL.md').write_text('local adaptation', encoding='utf-8')
-            self.assertEqual(runtime.find_skill('ppt-master', 'codex', home), shared)
+            self.assertIsNone(runtime.find_skill("ppt-master", "codex", home))
+            pinned = runtime.engine_checkout(home) / "skills/ppt-master"
+            pinned.mkdir(parents=True)
+            (pinned / "SKILL.md").write_text("pinned", encoding="utf-8")
+            self.assertEqual(runtime.find_skill("ppt-master", "codex", home), pinned)
 
     def test_write_refuses_foreign_json(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -163,6 +163,21 @@ class TextTests(unittest.TestCase):
         self.assertEqual(self.kinds("смоделировано"), [])
         self.assertEqual(self.kinds("смоделировано", strict=True), ["stop"])
 
+    def test_topic_is_checked_only_in_content_page_header(self):
+        prs = deck()
+        full(slide(prs))
+        page = slide(prs)
+        text(page, 0.05, 0.02, 0.7, 0.05, "Экономика труда", 14)
+        text(page, 0.05, 0.5, 0.7, 0.05, "Экономика труда", 22)
+        result = run(prs, topics=["экономика труда"])
+        self.assertEqual(sum(f["kind"] == "header" for f in result[2]), 1)
+
+    def test_decorative_separators_and_technical_units(self):
+        self.assertIn("separator", self.kinds("Оплата труда · Великобритания"))
+        self.assertIn("header", self.kinds("Оплата труда / Великобритания", y=0.02))
+        for value in ("кВт·ч", "кВт · час", "x · y", "25 руб./кг"):
+            self.assertEqual(self.kinds(value), [])
+
 
 class TitleTests(unittest.TestCase):
     def kinds(self, **kw):
@@ -179,7 +194,7 @@ class TitleTests(unittest.TestCase):
         self.assertEqual(self.kinds(authors=["Алиев", "Кузнец"]), {1: ["title"], 2: ["authors", "authors"]})
 
     def test_allow_title_and_no_authors(self):
-        self.assertEqual(self.kinds(allow_title=True), {})
+        self.assertEqual(self.kinds(allow_title=True), {1: ["separator"]})
 
 
 if __name__ == "__main__":

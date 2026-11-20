@@ -39,9 +39,11 @@ class DoctorTests(unittest.TestCase):
         for host, group in (('claude', 'Ядро'), ('codex', 'По блокам')):
             with patch.object(doctor, 'run', return_value=(0, '')), patch.object(doctor, 'skill_dir', return_value=None), patch.object(doctor, 'mcp_names', return_value=set()), patch.object(doctor, 'installed_plugins', return_value={'ppt-master@ppt-master': {}}):
                 rows = {r['name']: r for r in doctor.checks(host)}
-            self.assertEqual(rows['ppt-master из маркетплейса preza (форк)']['group'], group)
-            row = rows['без старого источника ppt-master']
-            self.assertIn('claude plugin uninstall ppt-master@ppt-master', row['fix'] if host == 'claude' else row['manual'])
+            if host == "codex":
+                self.assertNotIn("ppt-master из маркетплейса preza (форк)", rows)
+                self.assertIn("Orca для исполнителей Codex", rows)
+            else:
+                self.assertEqual(rows["ppt-master из маркетплейса preza (форк)"]["group"], group)
 
     def test_git_subdir_plugin_updates_compare_with_fork_branch(self):
         with tempfile.TemporaryDirectory() as tmp:

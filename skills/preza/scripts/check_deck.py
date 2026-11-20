@@ -79,6 +79,20 @@ def yo(text):
     return text.replace("ё", "е").replace("Ё", "Е")
 
 
+# Limit automatic separator findings to pairs of words. Numeric products,
+# formula symbols, compound units and URL slashes need different semantics.
+WORD_PAIR = r"[А-Яа-яЁёA-Za-z]{2,}"
+DECORATIVE_DOT = re.compile(rf"\b{WORD_PAIR}\s+·\s+{WORD_PAIR}\b")
+HEADER_SLASH = re.compile(rf"\b{WORD_PAIR}\s+/\s+{WORD_PAIR}\b")
+UNIT_PAIR = re.compile(
+    r"(?i)\b(?:к?вт|ньютон|кг|моль|па)\s+·\s+(?:час|мин|сек|метр)\w*\b"
+)
+
+
+def normalized_topic(text):
+    return " ".join(yo(text).casefold().split()).strip(" .–—:")
+
+
 def author_rx(name):
     """Фамилия в падежах, с заглавной или капсом, текст — через yo(): «Кузнец» — не «Кузнецов», «Ли» — не «лишь», «Смирнова» — и «Смирновой»."""
     name = yo(name.strip())
@@ -313,7 +327,9 @@ def check(
     render=None,
     authors=(),
     allow_title=False,
+    topics=(),
 ):
+    topics = {normalized_topic(t) for t in topics if t.strip()}
     prs = Presentation(deck_path)
     authors = [(name, author_rx(name)) for name in authors]
     sw, sh_ = prs.slide_width, prs.slide_height
@@ -371,9 +387,30 @@ def check(
                 add("counter", "error", f"счётчик «{body.strip()}»")
             for m in WORKNOTE.finditer(body):
                 add("worknote", "error", f"рабочая пометка «{m.group(0)}»")
-            if no == 1 and not allow_title:
-                for hit in title_hits(body):
+            title_marks = title_hits(body) if no == 1 else []
+            if not allow_title:
+                for hit in title_marks:
                     add("title", "error", f"служебная строка титула «{hit}»")
+            for line in body.splitlines():
+                if (
+                    "=" not in line
+                    and DECORATIVE_DOT.search(UNIT_PAIR.sub("", line))
+                    and not (no == 1 and title_hits(line) and not allow_title)
+                ):
+                    add(
+                        "separator",
+                        "error",
+                        f"декоративный разделитель «{line.strip()}»",
+                    )
+                if nb[1] < EDGE and not getattr(sh, "has_table", False):
+                    if HEADER_SLASH.search(line):
+                        add(
+                            "header",
+                            "error",
+                            f"служебная шапка через косую черту «{line.strip()}»",
+                        )
+                    elif no > 1 and normalized_topic(line) in topics:
+                        add("header", "error", f"повтор темы в шапке «{line.strip()}»")
             for name, rx in authors if no > 1 else ():
                 if rx.search(yo(body)):
                     add("authors", "error", f"фамилия автора «{name}» вне титула")
@@ -482,6 +519,7 @@ def main():
         "--render",
         help="папка PNG рендера (5-проверка/roundN): зона с картинкой во весь слайд — не пустота",
     )
+    ap.add_argument("--topic", action="append", default=[], help="точная тема колоды или курса для проверки верхней полосы (можно повторить)")
     ap.add_argument(
         "--authors",
         default="",
@@ -511,6 +549,7 @@ def main():
             render=a.render,
             authors=[x.strip() for x in a.authors.split(",") if x.strip()],
             allow_title=a.allow_title,
+            topics=a.topic,
         )
     except ValueError as e:
         sys.exit(f"ошибка: {e}")

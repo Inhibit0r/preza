@@ -244,7 +244,7 @@ def append_block(path, memory, host):
         f.write(("" if not text else "\n" if text.endswith("\n") else "\n\n") + block)
 
 
-def init(root, kind, host="claude"):
+def init(root, kind, host="codex"):
     root = Path(root)
     for p in visible(root):
         if p.is_dir() and any((p / name).is_file() for name in MEMORY.values()):
@@ -341,9 +341,9 @@ def selftest():
         assert find(subject)["kind"] == "none"
         (subject / "Задание").mkdir()
         (subject / "CLAUDE.md").write_text("# Свои правила\n", encoding="utf-8")
-        init(subject, "subject")
+        init(subject, "subject", host="claude")
         snapshot = {p: p.read_text(encoding="utf-8") for p in subject.glob("*.md")}
-        init(subject, "subject")  # повторный запуск ничего не меняет
+        init(subject, "subject", host="claude")  # повторный запуск ничего не меняет
         assert snapshot == {
             p: p.read_text(encoding="utf-8") for p in subject.glob("*.md")
         }
@@ -545,7 +545,7 @@ def main():
     p = sub.add_parser("init")
     p.add_argument("folder")
     p.add_argument("--kind", choices=MEMORY, required=True)
-    p.add_argument("--host", choices=COMMAND, default="claude")
+    p.add_argument("--host", choices=COMMAND, default="codex")
     p = sub.add_parser("work")
     p.add_argument("folder")
     p.add_argument("--series")
