@@ -54,6 +54,21 @@ class SpeechTests(unittest.TestCase):
         )
         self.assertEqual((errors, warnings), ([], []))
 
+    def test_illustration_labels_block_speech_and_word_on_any_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / "speech.docx"
+            docx(file, "Слайд 1. А\nУсловная иллюстрация прибора.")
+            errors, _, _ = check_speech.check(
+                speech("Предметная иллюстрация кольца."), 1, None, None, word=file
+            )
+            self.assertIn("стоп-фраза сдачи: «Условная иллюстрация»", errors)
+            self.assertIn("стоп-фраза сдачи: «Предметная иллюстрация»", errors)
+            self.assertFalse(
+                check_speech.check(
+                    speech("Сортировка камней в Мирном."), 1, None, None
+                )[0]
+            )
+
     def test_word_dashes_and_yo(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "speech.docx"

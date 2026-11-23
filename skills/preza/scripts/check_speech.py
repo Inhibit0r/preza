@@ -9,7 +9,7 @@
 так сверяют сданный Word со снимком сданной речи (script.delivered.md --docx).
 
 Стоп-список сдачи (stoplist.py) ищется в речи, в слайдах (--pptx) и в Word (--docx): предупреждение,
-при --strict (учебная сдача) — ошибка. --forbid — дополнительные запреты пользователя (всегда ошибка).
+при --strict (учебная сдача) — ошибка. Служебные подписи иллюстраций и выражения --forbid всегда считаются ошибками.
 --pptx сверяет заметки докладчика каждого слайда с разделом речи (пробелы не учитываются).
 --docx: шапка, заголовки и текст разделов «Слайд N.» в Word совпадают с речью (без учёта пробелов, «ё»/«е», вида тире, разметки md) —
 иначе ошибка: ловит и ручные правки одного из файлов; «—» и «ё» в Word — предупреждение, при --strict — ошибка.
@@ -149,9 +149,12 @@ def check(
         found = [m.group(0) for t in texts for m in re.finditer(forbid, t, re.I)]
         if found:
             errors.append(f"запрещённые формулировки: {found}")
-    stop = [frag for t in texts for frag, _ in stoplist.findings(t, strict, allow)]
-    if stop:
-        soft.append(f"стоп-фразы сдачи: {stop}")
+    for body in texts:
+        for frag, hard in stoplist.findings(body, strict, allow):
+            target = errors if hard else soft
+            message = f"стоп-фраза сдачи: «{frag}»"
+            if message not in target:
+                target.append(message)
     return errors, warnings, per
 
 

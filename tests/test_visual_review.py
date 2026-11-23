@@ -24,6 +24,74 @@ class VisualTests(unittest.TestCase):
         item["end"] = item["points"][1][0] = "2025-Q2"
         self.assertTrue(series_errors(item))
 
+    def test_gap_requires_real_empty_cell_spoken_reason_and_source(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            deck = Presentation()
+            slide = deck.slides.add_slide(deck.slide_layouts[6])
+            data = CategoryChartData()
+            labels = ["2021-Q4", "2022-Q1", "2022-Q2", "2022-Q3"]
+            data.categories = labels
+            data.add_series("SELFTEST", [12, None, 0, 35])
+            chart = slide.shapes.add_chart(
+                XL_CHART_TYPE.LINE, 0, 0, Inches(4), Inches(3), data
+            ).chart
+            slide.shapes.add_table(2, 2, Inches(4), 0, Inches(3), Inches(3))
+            png = root / "slide-01.png"
+            png.write_bytes(b"SELFTEST")
+            reason = "В таблице за первый квартал 2022 года показатель не опубликован."
+            item = dict(
+                slide=1,
+                name="SELFTEST",
+                frequency="quarter",
+                start=labels[0],
+                end=labels[-1],
+                points=[
+                    [label, val, "S1"] for label, val in zip(labels, (12, None, 0, 35))
+                ],
+                gap_notes={labels[1]: reason},
+            )
+            checks = dict(
+                composition="Сравнение",
+                time_axis="Календарная ось",
+                table="Шапка и строки на одной сетке",
+            )
+            row = dict(
+                slide=1,
+                png_sha256=digest(png),
+                reviewer="ctx_SELFTEST",
+                verdict="APPROVED",
+                checks=checks,
+            )
+
+            def inspect():
+                path = root / "chart.pptx"
+                deck.save(path)
+                return verify(
+                    path,
+                    root,
+                    dict(deck_sha256=digest(path), series=[item], slides=[row]),
+                )
+
+            self.assertTrue(any("speaker notes" in e for e in inspect()))
+            slide.notes_slide.notes_text_frame.text = reason
+            self.assertEqual(inspect(), [])
+            del checks["table"]
+            self.assertTrue(any("table" in e for e in inspect()))
+            checks["table"] = "Шапка покрывает все строки"
+            item["points"][1][2] = ""
+            self.assertTrue(any("source" in e for e in inspect()))
+            item["points"][1][2] = "S1"
+            mode = chart._chartSpace.xpath(".//c:dispBlanksAs")[0]
+            mode.set("val", "span")
+            self.assertTrue(any("display as gaps" in e for e in inspect()))
+            mode.set("val", "gap")
+            # A real reported zero moves into the missing slot while the cache still has three values.
+            chart._chartSpace.xpath('.//c:val//c:pt[@idx="2"]')[0].set("idx", "1")
+            self.assertTrue(any("match" in e for e in inspect()))
+            del item["gap_notes"][labels[1]]
+            self.assertTrue(series_errors(item))
+
     def test_native_series_and_final_evidence(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

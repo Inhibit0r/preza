@@ -2,18 +2,18 @@
 """Пустоты и служебные пометки на слайдах PPTX до показа пользователю.
 
     python3 check_deck.py deck.pptx [--render 5-проверка/roundN] [--skip 1,13] [--accept 7] [--empty 0.30] [--strict] [--allow REGEX]
-                          [--authors "Фамилия,Фамилия"] [--allow-title] [--json]
+                          [--authors "Фамилия,Фамилия"] [--cover-text TEXT ...] [--allow-title] [--json]
     python3 check_deck.py --selftest
 
 Пустота — самый большой прямоугольник слайда без содержимого (доля площади ≥ --empty) или пустая часть
 карточки-контейнера. Содержимое: картинки (кроме фона ≥90 % слайда), графики, таблицы, мелкие фигуры
 и занятая текстом площадь (оценка по кеглю и переносу; рамки wrap="none" — как есть).
 --skip — слайды без проверки пустот (по умолчанию первый и последний), --accept — намеренные пустоты
-из раскадровки. Стоп-список (stoplist.py) — предупреждение, при --strict (учебная сдача) — ошибка.
+из раскадровки. Служебные подписи изображений блокируют сдачу на любом уровне. Остальные стоп-фразы становятся ошибками при --strict.
 Титул (слайд 1): служебная строка курса, темы, вида работы или ссылки на главу и источник — ошибка, кроме
---allow-title (задание требует курс на титуле). --authors: фамилии авторов на слайдах со второго — ошибка.
+--allow-title для прежних вызовов. При сдаче укажи разрешённые надписи через --cover-text. --authors: фамилии авторов на слайдах со второго — ошибка.
 Код выхода 1 — непринятая пустота, счётчик «NN/NN», номер слайда, служебная строка титула, фамилия автора
-вне титула или стоп-фраза при --strict.
+вне титула или другое нарушение с уровнем error.
 """
 
 import argparse
@@ -316,6 +316,73 @@ def content_boxes(slide, sw, sh_):
     return classify(slide, sw, sh_)[0]
 
 
+SOURCE_HEADINGS = {
+    "источники",
+    "первоисточники",
+    "список источников",
+    "список литературы",
+    "источники и литература",
+    "использованные источники",
+}
+COURSE_REFERENCE = re.compile(
+    r"\b(?:учебная основа|лекци[ияй] курса|лекции по курсу|материалы (?:данного |учебного )?(?:курса|лекции|лекций|семинара|разработчика)|"
+    r"конспект(?:ы)? лекци[ий]|обе части лекции)\b|^\s*(?:курсовые материалы|лекция (?:от |по |№?\s*\d)|лекции от )"
+    r"|^\s*(?:материалы|курсы?|лекции|конспекты|учебные материалы)\s*[:.]?\s*$",
+    re.I | re.M,
+)
+ICON_NAME = re.compile(r"(?:^|[\W_])(?:icons?|иконк[аи])(?:[\W_]|$)", re.I)
+
+
+def cover_errors(blocks, expected):
+    # A title may wrap over separate PowerPoint shapes; use their reading order.
+    actual = " ".join(" ".join(body for _, body in sorted(blocks)).casefold().split())
+    errors = []
+    for label in sorted(expected, key=len, reverse=True):
+        label = " ".join(label.casefold().split())
+        if not label:
+            continue
+        actual, count = re.subn(
+            r"(?<!\S)" + re.escape(label) + r"(?!\S)", " ", actual, count=1
+        )
+        if not count:
+            errors.append(f"нет согласованной надписи «{label}»")
+    if actual.strip():
+        errors.append(f"лишний текст титула «{' '.join(actual.split())}»")
+    return errors
+
+
+def detached_table_icons(shapes):
+    """Find a column of named row icons hanging beyond a native table's header."""
+    icons = [s for s in shapes if ICON_NAME.search(s.name)]
+    for shape in shapes:
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from detached_table_icons(shape.shapes)
+        if not shape.has_table or not icons:
+            continue
+        table = shape.table
+        left, right = shape.left, shape.left + shape.width
+        top = shape.top + table.rows[0].height
+        outside = []
+        for row in list(table.rows)[1:]:
+            height = row.height
+            for icon in icons:
+                x, width = icon.left, icon.width
+                center_y = icon.top + icon.height / 2
+                if (
+                    top <= center_y < top + height
+                    and 0 < width <= height
+                    and (
+                        left - width - height / 2 <= x < left - PT / 2
+                        or right + PT / 2 < x + width <= right + width + height / 2
+                    )
+                ):
+                    outside.append(icon.name)
+                    break
+            top += height
+        if len(outside) >= 2:
+            yield f"иконки строк за границей шапки таблицы «{shape.name}»: {', '.join(outside)}"
+
+
 def check(
     deck_path,
     *,
@@ -328,6 +395,7 @@ def check(
     authors=(),
     allow_title=False,
     topics=(),
+    cover_text=(),
 ):
     topics = {normalized_topic(t) for t in topics if t.strip()}
     prs = Presentation(deck_path)
@@ -357,6 +425,14 @@ def check(
         )  # noqa: E731
         void_level = "accepted" if no in accept else "error"
         content, containers, texts = classify(slide, sw, sh_)
+        cover_blocks = []
+        source_page = any(
+            sh.has_text_frame
+            and normalized_topic(sh.text_frame.text) in SOURCE_HEADINGS
+            for sh, _ in texts
+        )
+        for detail in detached_table_icons(slide.shapes):
+            add("table-icons", "error", detail)
         if no not in skip:
             share, rect = largest_empty(content)
             png = (pngs[no - 1] if by_slide else pngs[visible - 1]) if pngs else None
@@ -387,7 +463,16 @@ def check(
                 add("counter", "error", f"счётчик «{body.strip()}»")
             for m in WORKNOTE.finditer(body):
                 add("worknote", "error", f"рабочая пометка «{m.group(0)}»")
-            title_marks = title_hits(body) if no == 1 else []
+            if cover_text and visible == 1:
+                cover_blocks.append(((nb[1], nb[0]), body))
+            if source_page or nb[1] >= 1 - EDGE:
+                if match := COURSE_REFERENCE.search(body):
+                    add(
+                        "sources",
+                        "error",
+                        f"учебная пометка в источниках «{match[0].strip()}»",
+                    )
+            title_marks = title_hits(body) if no == 1 and not cover_text else []
             if not allow_title:
                 for hit in title_marks:
                     add("title", "error", f"служебная строка титула «{hit}»")
@@ -414,13 +499,18 @@ def check(
             for name, rx in authors if no > 1 else ():
                 if rx.search(yo(body)):
                     add("authors", "error", f"фамилия автора «{name}» вне титула")
-            for frag, _ in stoplist.findings(body, strict, allow):
-                add("stop", "error" if strict else "warn", f"«{frag}»")
+            for frag, hard in stoplist.findings(body, strict, allow):
+                add("stop", "error" if hard or strict else "warn", f"«{frag}»")
+        if cover_text and visible == 1:
+            for detail in cover_errors(cover_blocks, cover_text):
+                add("cover", "error", detail)
         if slide.has_notes_slide:
-            for frag, _ in stoplist.findings(
-                slide.notes_slide.notes_text_frame.text, strict, allow
-            ):
-                add("stop", "error" if strict else "warn", f"заметки: «{frag}»")
+            frame = slide.notes_slide.notes_text_frame
+            notes = frame.text if frame is not None else ""
+            if source_page and (match := COURSE_REFERENCE.search(notes)):
+                add("sources", "error", f"заметки к источникам: «{match[0].strip()}»")
+            for frag, hard in stoplist.findings(notes, strict, allow):
+                add("stop", "error" if hard or strict else "warn", f"заметки: «{frag}»")
         if found:
             result[no] = found
     return result
@@ -528,8 +618,9 @@ def main():
     ap.add_argument(
         "--allow-title",
         action="store_true",
-        help="задание требует курс или вид работы на титуле (раздел «Требования к сдаче» памяти предмета)",
+        help="прежний режим для явно заказанной служебной строки. При сдаче перечислите согласованные надписи через --cover-text",
     )
+    ap.add_argument("--cover-text", action="append", default=[], help="дословная надпись титула из задания: отдельно тема, строка ФИО и только явно заказанные дополнения")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
@@ -550,6 +641,7 @@ def main():
             authors=[x.strip() for x in a.authors.split(",") if x.strip()],
             allow_title=a.allow_title,
             topics=a.topic,
+            cover_text=a.cover_text,
         )
     except ValueError as e:
         sys.exit(f"ошибка: {e}")

@@ -180,6 +180,62 @@ class TextTests(unittest.TestCase):
 
 
 class TitleTests(unittest.TestCase):
+    def test_cover_compares_requested_text_across_shapes_and_line_breaks(self):
+        prs = deck()
+        first = slide(prs)
+        text(first, 0.1, 0.5, 0.8, 0.1, "Иванова Анна")
+        text(first, 0.1, 0.1, 0.8, 0.2, "Почему меняется\vрынок?")
+        approved = ["Почему меняется рынок?", "Иванова Анна"]
+
+        def issues(fields):
+            return [
+                f
+                for f in run(prs, cover_text=fields, allow_title=True).get(1, [])
+                if f["kind"] == "cover"
+            ]
+
+        self.assertFalse(issues(approved))
+        text(first, 0.1, 0.7, 0.7, 0.08, "Группа 403")
+        self.assertTrue(issues(approved))
+        self.assertFalse(issues([*approved, "Группа 403"]))
+        self.assertTrue(issues(["Другая тема", "Иванова Анна", "Группа 403"]))
+
+    def test_photo_footnote_and_document_title_vs_production_and_course_labels(self):
+        prs = deck()
+        slide(prs)
+        scene = slide(prs)
+        text(scene, 0.1, 0.2, 0.8, 0.1, "Предметная иллюстрация двух камней")
+        text(scene, 0.1, 0.8, 0.8, 0.1, "Сортировка алмазов в Мирном, 2018.")
+        scene.notes_slide.notes_text_frame.text = "Условная иллюстрация камеры роста."
+        sources = slide(prs)
+        text(sources, 0.1, 0.1, 0.8, 0.1, "Первоисточники")
+        text(sources, 0.1, 0.3, 0.8, 0.1, "Банк России. Курсы валют за 2024 год")
+        text(sources, 0.1, 0.6, 0.8, 0.1, "Материалы курса")
+        sources.notes_slide.notes_text_frame.text = "В конце приведены лекции курса."
+        reports = run(prs)
+        self.assertEqual(
+            sum(f["kind"] == "stop" and f["level"] == "error" for f in reports[2]), 2
+        )
+        self.assertEqual(sum(f["kind"] == "sources" for f in reports[3]), 2)
+
+    def test_row_icons_share_table_bounds(self):
+        prs = deck()
+        page = slide(prs)
+        table = page.shapes.add_table(3, 2, W // 5, H // 5, W // 2, 3 * H // 5)
+        icons = []
+        for i in (1, 2):
+            icon = rect(page, 0.14, 0.2 + i * 0.2 + 0.05, 0.06, 0.10)
+            icon.name = f"row-icon-{i}"
+            icons.append(icon)
+
+        def detached():
+            return any(f["kind"] == "table-icons" for f in run(prs).get(1, []))
+
+        self.assertTrue(detached())
+        for icon in icons:
+            icon.left = table.left + W // 100
+        self.assertFalse(detached())
+
     def kinds(self, **kw):
         prs = deck()
         first, second = slide(prs), slide(prs)

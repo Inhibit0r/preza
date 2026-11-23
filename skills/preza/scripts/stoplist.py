@@ -35,6 +35,11 @@ STOP = re.compile(
     + r"|imagegen|gpt-image|авторская иллюстрация",
     re.I | re.M,  # $ — конец строки подписи внутри многострочного текста
 )
+# Editorial labels are errors in every delivery, including a talk without a Word file.
+CAPTION = re.compile(
+    r"\b(?:условн|предметн)\w*\s+иллюстраци\w*|\b(?:показан[аоы]?|изображ[её]н[аоы]?)\s+условно\b",
+    re.I,
+)
 STRICT = re.compile(
     r"симуляц\w*|смоделирован\w*|синтетическ\w*"
     r"|\bДЗ\s*-?\s*\d|домашн\w+ задани\w+\s*№?\s*\d"
@@ -44,8 +49,8 @@ STRICT = re.compile(
 
 
 def findings(text, strict=False, allow=None):
-    """[(фрагмент, строгое ли правило)]; allow — регулярка по контексту ±20 знаков вокруг находки."""
-    out = []
+    """[(фрагмент, обязательная ошибка)]; allow — регулярка по контексту ±20 знаков вокруг находки."""
+    out = [(m[0], True) for m in CAPTION.finditer(text)]
     for pattern, is_strict in ((STOP, False), (STRICT, True)):
         if is_strict and not strict:
             continue
