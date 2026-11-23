@@ -1,7 +1,7 @@
 {
   "name": "preza",
-  "version": "1.4.0-rc.3",
-  "description": "Редактируемые презентации через Codex, Orca и PPT Master. Бриф, дизайн, речь и независимая проверка рендеров.",
+  "version": "1.4.0-rc.4",
+  "description": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
   "author": {
     "name": "Inhibit0r",
     "url": "https://github.com/Inhibit0r"
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "preza",
     "shortDescription": "Презентация под ключ",
-    "longDescription": "Редактируемые презентации через Codex, Orca и PPT Master. Бриф, дизайн, речь и независимая проверка рендеров.",
+    "longDescription": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
     "developerName": "Inhibit0r",
     "category": "Productivity",
     "capabilities": [

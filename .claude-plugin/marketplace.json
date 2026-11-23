@@ -9,9 +9,10 @@
   "plugins": [
     {
       "name": "preza",
-      "description": "Preza для ведущего Claude Code или Codex; независимое ревью субагентом, картинки Codex, нативный PPTX и PowerPoint Windows/macOS.",
+      "description": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
       "source": "./",
-      "category": "productivity"
+      "category": "productivity",
+      "version": "1.4.0-rc.4"
     },
     {
       "name": "ppt-master",

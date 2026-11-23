@@ -76,6 +76,26 @@ class VisualTests(unittest.TestCase):
             self.assertTrue(any("speaker notes" in e for e in inspect()))
             slide.notes_slide.notes_text_frame.text = reason
             self.assertEqual(inspect(), [])
+            for kind in ("host-subagent", "separate-session", "human"):
+                row["reviewer"] = {
+                    "kind": kind,
+                    "id": "SELFTEST-2",
+                    "evidence": "review/notes.md",
+                }
+                self.assertEqual(inspect(), [])
+            for reviewer in (
+                None,
+                "manual",
+                {"kind": "lead", "id": "SELFTEST", "evidence": "self"},
+            ):
+                row["reviewer"] = reviewer
+                self.assertTrue(
+                    any("independent approval" in error for error in inspect())
+                )
+            row["reviewer"] = "ctx_SELFTEST"
+            row["verdict"] = "PENDING"
+            self.assertTrue(any("independent approval" in error for error in inspect()))
+            row["verdict"] = "APPROVED"
             del checks["table"]
             self.assertTrue(any("table" in e for e in inspect()))
             checks["table"] = "Шапка покрывает все строки"

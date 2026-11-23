@@ -148,6 +148,22 @@ def chart_errors(series, entries, blanks_mode):
     return ["chart values or blanks do not match sourced observations"]
 
 
+def independent_reviewer(reviewer):
+    if isinstance(reviewer, str):
+        return bool(re.fullmatch(r"ctx_[\w-]+", reviewer))
+    if not isinstance(reviewer, dict):
+        return False
+    identity = reviewer.get("id")
+    evidence = reviewer.get("evidence")
+    return (
+        reviewer.get("kind") in ("host-subagent", "separate-session", "human")
+        and isinstance(identity, str)
+        and bool(re.fullmatch(r"[\w][\w.:-]*", identity))
+        and isinstance(evidence, str)
+        and bool(evidence.strip())
+    )
+
+
 def verify(deck, render, receipt):
     slides = list(Presentation(deck).slides)
     pages = list(range(1, len(slides) + 1))
@@ -172,7 +188,9 @@ def verify(deck, render, receipt):
             page = slides[number - 1]
             frame = page.notes_slide.notes_text_frame if page.has_notes_slide else None
             notes = frame.text if frame is not None else ""
-            problems.extend(f"slide {number}: {message}" for message in series_errors(item, notes))
+            problems.extend(
+                f"slide {number}: {message}" for message in series_errors(item, notes)
+            )
     for number, png, row in zip(pages, pngs, rows):
         slide = slides[number - 1]._element
         required = {"composition"}
@@ -194,8 +212,8 @@ def verify(deck, render, receipt):
             required.add("time_axis")
         if row["png_sha256"] != digest(png):
             problems.append(f"slide {number}: PNG changed since review")
-        if row["verdict"] != "APPROVED" or not re.fullmatch(
-            r"ctx_[\w-]+", row["reviewer"]
+        if row["verdict"] != "APPROVED" or not independent_reviewer(
+            row.get("reviewer")
         ):
             problems.append(f"slide {number}: missing independent approval")
         for key in required:

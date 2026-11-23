@@ -1,7 +1,7 @@
 {
   "name": "preza",
-  "version": "1.3.5",
-  "description": "Презентация под ключ из Claude Code или Codex: маршрут по окружению, независимое ревью, нативный PPTX и рендер PowerPoint.",
+  "version": "1.4.0-rc.4",
+  "description": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
   "author": {
     "name": "Inhibit0r",
     "url": "https://github.com/Inhibit0r"

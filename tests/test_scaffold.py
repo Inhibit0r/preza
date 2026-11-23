@@ -42,6 +42,22 @@ class ScaffoldTests(unittest.TestCase):
             self.assertFalse((root / "CLAUDE.md").exists())
             self.assertTrue((root / "БРЕНД.md").is_file() and (root / "Бренд").is_dir())
 
+    def test_manual_uses_neutral_entry_and_keeps_existing_rule_block(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            rules = project / "AGENTS.md"
+            rules.write_text("# Правила владельца\n", encoding="utf-8")
+            self.assertEqual(
+                run("init", tmp, "--kind", "subject", "--host", "manual").returncode, 0
+            )
+            first = rules.read_text(encoding="utf-8")
+            self.assertIn("skills/preza/SKILL.md", first)
+            self.assertTrue(first.startswith("# Правила владельца"))
+            self.assertNotIn("$preza:preza", first)
+            self.assertFalse((project / "CLAUDE.md").exists())
+            scaffold.init(tmp, "subject", host="codex")
+            self.assertEqual(rules.read_text(encoding="utf-8"), first)
+
     def test_existing_memory_keeps_text_and_gets_section(self):
         with tempfile.TemporaryDirectory() as tmp:
             memory = Path(tmp) / "КУРС.md"
@@ -61,7 +77,9 @@ class ScaffoldTests(unittest.TestCase):
             )
             self.assertEqual(set(paths), {"work", "src", *scaffold.KEYS})
             self.assertEqual(run("check", paths["work"]).returncode, 0)
-            (Path(paths["work"]) / "черновик.md").write_text("", encoding="utf-8")  # файл пользователя
+            (Path(paths["work"]) / "черновик.md").write_text(
+                "", encoding="utf-8"
+            )  # файл пользователя
             self.assertEqual(run("check", paths["work"]).returncode, 0)
             (Path(paths["work"]) / "render").mkdir()  # папка preza не на месте
             self.assertEqual(run("check", paths["work"]).returncode, 1)

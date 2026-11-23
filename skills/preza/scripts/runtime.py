@@ -1,4 +1,5 @@
 """Resolve the coordinating runtime and registered skill assets without model calls."""
+
 import argparse
 import json
 import os
@@ -11,9 +12,13 @@ import sys
 SKILLS = Path(__file__).resolve().parents[2]
 ENGINE_REPO = "https://github.com/Inhibit0r/ppt-master.git"
 ENGINE_REVISION = "1ab8a4df202677e442daebcc21931e33fbcc08df"
+HOSTS = ("claude", "codex", "manual")
 
 
 def data_root(home=None):
+    override = os.environ.get("PREZA_DATA_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
     return (Path.home() if home is None else Path(home)) / ".local" / "share" / "preza"
 
 
@@ -36,151 +41,173 @@ def memory_root(home=None):
 
 
 def resolve_host(explicit=None, environ=None):
-    if explicit in ('claude', 'codex'):
+    if explicit is not None:
+        if explicit not in HOSTS:
+            raise ValueError(f"Unsupported host: {explicit}")
         return explicit
     env = os.environ if environ is None else environ
-    hosts = []
-    if env.get('CODEX_THREAD_ID'):
-        hosts.append('codex')
-    if env.get('CLAUDECODE') == '1':
-        hosts.append('claude')
-    if len(hosts) != 1:
-        raise ValueError('Runtime identity is missing or inherited from both hosts; pass --host claude|codex from the actual conversation')
-    return hosts[0]
+    codex = bool(env.get("CODEX_THREAD_ID"))
+    claude = env.get("CLAUDECODE") == "1"
+    if codex and claude:
+        raise ValueError(
+            "Runtime identity is inherited from both hosts; pass --host claude|codex|manual from the actual conversation"
+        )
+    return "codex" if codex else "claude" if claude else "manual"
 
 
 def roles(host, level=None):
-    if host not in ('claude', 'codex'):
-        raise ValueError('Unsupported host')
-    if host == "codex":
-        profiles = json.loads(
-            (SKILLS / "preza/references/worker-profiles.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        if level is not None and level not in profiles["levels"]:
-            raise ValueError(f"Unknown preza level: {level}")
-        workers = {}
-        if level is not None:
-            for role, effort in profiles["levels"][level].items():
-                workers[role] = {"model": profiles["model"], "effort": effort}
-        return {
-            "host": host,
-            "coordinator": host,
-            "reviewer": "orca-codex-worker",
-            "review_skill": "orchestration",
-            "level": level,
-            "worker_profiles": workers,
-            "image_provider": "codex",
-            "image_mode": "native-tool-if-available",
-        }
-    return {'host': host, 'coordinator': host,
-            'reviewer': f'{host}-subagent',
-            'review_skill': 'doubt-driven-development',
-            'image_provider': 'codex',
-            'image_mode': 'native-tool-if-available' if host == 'codex' else 'codex-exec'}
+    host = resolve_host(host)
+    profiles = json.loads(
+        (SKILLS / "preza/references/worker-profiles.json").read_text(encoding="utf-8")
+    )
+    if level is not None and level not in profiles["levels"]:
+        raise ValueError(f"Unknown preza level: {level}")
+    reviewer, review_skill = {
+        "codex": ("orca-codex-worker", "orchestration"),
+        "claude": ("claude-subagent", "doubt-driven-development"),
+        "manual": ("separate-session-or-human", None),
+    }[host]
+    workers = {}
+    if host == "codex" and level is not None:
+        for role, effort in profiles["levels"][level].items():
+            workers[role] = {"model": profiles["model"], "effort": effort}
+    return {
+        "host": host,
+        "coordinator": host,
+        "reviewer": reviewer,
+        "review_skill": review_skill,
+        "level": level,
+        "worker_profiles": workers,
+        "image_provider": "codex" if host == "codex" else "current-host",
+        "image_mode": "native-tool-if-available",
+    }
+
+
+def claude_root(home=None):
+    home = Path.home() if home is None else Path(home)
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude").expanduser()
 
 
 def installed_claude_plugins(home=None):
-    home = Path.home() if home is None else Path(home)
-    path = home / '.claude/plugins/installed_plugins.json'
+    path = claude_root(home) / "plugins/installed_plugins.json"
     if not path.is_file():
         return {}
-    return json.loads(path.read_text(encoding='utf-8')).get('plugins', {})
+    return json.loads(path.read_text(encoding="utf-8")).get("plugins", {})
 
 
-def find_skill(name, host=None, home=None):
-    home = Path.home() if home is None else Path(home)
-    override = os.environ.get('PREZA_PPT_MASTER') if name == 'ppt-master' else None
-    if override and (Path(override) / 'SKILL.md').is_file():  # dev: a fork clone loaded with --plugin-dir
-        return Path(override).resolve()
-    if host == "codex":
-        if name == "ppt-master":
-            if override:
-                return None
-            engine = engine_checkout(home) / "skills" / name
-            return engine if (engine / "SKILL.md").is_file() else None
-        codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
-        for root in (
-            SKILLS,
-            home / ".agents/skills",
-            codex / "skills",
-            codex / "skills/.system",
-        ):
-            candidate = root / name
-            if (candidate / "SKILL.md").is_file():
-                return candidate.resolve()
-        return None
-    roots = [SKILLS, home / '.agents/skills']
-    clients = [host, 'claude' if host == 'codex' else 'codex'] if host else ['claude', 'codex']
-    roots += [home / f'.{client}/skills' for client in clients]
-    for root in roots:
-        candidate = root / name
-        if (candidate / 'SKILL.md').is_file():
-            return candidate.resolve()
-    # A registered plugin can supply files to either host; this does not assert native invocation.
+def registered_claude_skill(name, home):
     plugins = installed_claude_plugins(home)
-    # ppt-master from the preza marketplace (fork) wins over the upstream marketplace
-    for key in sorted(plugins, key=lambda k: not k.endswith('@preza')):
+    # The historically supported preza fork takes priority among registrations.
+    for key in sorted(plugins, key=lambda k: not k.endswith("@preza")):
         rows = plugins[key]
         for rec in rows if isinstance(rows, list) else [rows]:
-            if rec.get('scope') not in (None, 'user'):
+            if rec.get("scope") not in (None, "user"):
                 continue
-            root = Path(rec.get('installPath', ''))
+            root = Path(rec.get("installPath", ""))
             if not root.is_absolute():
                 continue
-            for candidate in (root / name, root / 'skills' / name):
-                if (candidate / 'SKILL.md').is_file():
+            for candidate in (root / name, root / "skills" / name):
+                if (candidate / "SKILL.md").is_file():
                     return candidate.resolve()
     return None
 
 
+def find_skill(name, host=None, home=None):
+    host = resolve_host(host)
+    home = Path.home() if home is None else Path(home)
+    isolated = bool(os.environ.get("PREZA_DATA_DIR"))
+    if name == "ppt-master":
+        override = os.environ.get("PREZA_PPT_MASTER")
+        if override:
+            engine = Path(override).expanduser().resolve()
+            return engine if (engine / "SKILL.md").is_file() else None
+        engine = engine_checkout(home) / "skills" / name
+        if (engine / "SKILL.md").is_file():
+            return engine
+        if host != "claude" or isolated:
+            return None
+        legacy = registered_claude_skill(name, home)
+        if legacy:
+            return legacy
+    roots = [SKILLS, data_root(home) / "skills"]
+    if not isolated:
+        roots.append(home / ".agents/skills")
+    if host == "codex":
+        codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
+        roots.extend((codex / "skills", codex / "skills/.system"))
+    if host == "claude":
+        roots.append(claude_root(home) / "skills")
+    for root in roots:
+        candidate = root / name
+        if (candidate / "SKILL.md").is_file():
+            return candidate.resolve()
+    return registered_claude_skill(name, home) if host == "claude" else None
+
+
 def preza_version(host="codex"):
-    path = SKILLS.parent / f".{host}-plugin" / "plugin.json"
-    return json.loads(path.read_text(encoding="utf-8")).get("version") if path.is_file() else None
+    return (SKILLS.parent / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def build_python(host):
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    versions = (version, "3.14", "3.12")
+    if host == "codex" and not os.environ.get("PREZA_DATA_DIR"):
+        versions = ("3.14", version, "3.12")
+    prepared = [venv_python(v) for v in dict.fromkeys(versions)]
+    if any(Path(sys.prefix).resolve() == p.parent.parent for p in prepared):
+        return sys.executable
+    return next((str(p) for p in prepared if p.is_file()), sys.executable)
 
 
 def context(host=None, level=None):
     host = resolve_host(host)
     result = roles(host, level)
-    result['preza_version'] = preza_version(host)
-    pm = find_skill('ppt-master', host)
-    review = find_skill(result['review_skill'], host)
-    result.update(platform=sys.platform, python=[sys.executable, '-X', 'utf8'],
-                  ppt_master=str(pm) if pm else None,
-                  review_skill_path=str(review) if review else None,
-                  codex_cli=shutil.which('codex'),
-                  deck_house_rules=str(SKILLS / 'deck-house-rules/SKILL.md'),
-                  renderer=str(SKILLS / 'preza/scripts/render_pptx.py'),
-                  evidence='CLI paths and registered files only; auth, native tools and model identities require live checks')
-    if host == "codex":
-        build = venv_python("3.14")
-        prepared = [venv_python(version) for version in ("3.14", "3.12")]
-        if (
-            Path(sys.prefix) not in {p.parent.parent for p in prepared}
-            and build.is_file()
-        ):
-            result["python"] = [str(build), "-X", "utf8"]
-        revision = None
-        if pm is not None and (pm.parent.parent / ".git").exists():
-            try:
-                git = subprocess.run(
-                    ["git", "-C", str(pm), "rev-parse", "HEAD"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    check=False,
-                )
-                if git.returncode == 0:
-                    revision = git.stdout.strip()
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-        result.update(
-            orca=shutil.which("orca"),
-            memory_root=str(memory_root()),
-            engine_revision=revision,
-            pinned_revision=ENGINE_REVISION,
-        )
+    pm = find_skill("ppt-master", host)
+    review = (
+        find_skill(result["review_skill"], host) if result["review_skill"] else None
+    )
+    revision = None
+    if pm is not None and (pm.parent.parent / ".git").exists():
+        try:
+            git = subprocess.run(
+                ["git", "-C", str(pm), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            if git.returncode == 0:
+                revision = git.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    engine_source = None
+    if pm:
+        if os.environ.get("PREZA_PPT_MASTER"):
+            engine_source = "override"
+        elif pm == engine_checkout() / "skills/ppt-master":
+            engine_source = "pinned"
+        else:
+            engine_source = "legacy-claude"
+    result.update(
+        preza_version=preza_version(host),
+        platform=sys.platform,
+        python=[build_python(host), "-X", "utf8"],
+        ppt_master=str(pm) if pm else None,
+        review_skill_path=str(review) if review else None,
+        independent_review_status="unverified",
+        image_tool_status="unverified",
+        codex_cli=shutil.which("codex") if host == "codex" else None,
+        orca=shutil.which("orca") if host == "codex" else None,
+        data_root=str(data_root()),
+        memory_root=str(memory_root()),
+        engine_source=engine_source,
+        engine_revision=revision,
+        pinned_revision=ENGINE_REVISION,
+        deck_house_rules=str(SKILLS / "deck-house-rules/SKILL.md"),
+        hosts_guide=str(SKILLS / "preza/references/hosts.md"),
+        renderer=str(SKILLS / "preza/scripts/render_pptx.py"),
+        evidence="Local discovery only; confirm tools and independent review in the actual session",
+    )
     return result
 
 
@@ -188,17 +215,17 @@ def write(path, data):
     """Слить окружение в runtime.json: пути и метку раскладки, которые пишет scaffold.py, сохранить."""
     path = Path(path)
     try:
-        old = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        old = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
     except ValueError as error:
-        raise ValueError(f'{path}: не JSON ({error}) — проверь файл, runtime.py его не перезаписывает') from error
+        raise ValueError(
+            f"{path}: не JSON ({error}) — проверь файл, runtime.py его не перезаписывает"
+        ) from error
     if not isinstance(old, dict):
-        raise ValueError(f'{path}: ожидался объект JSON — проверь файл, runtime.py его не перезаписывает')
-    if (
-        data.get("host") == old.get("host") == "codex"
-        and data.get("level") is None
-        and old.get("level")
-    ):
-        data = {**data, **roles("codex", old["level"])}
+        raise ValueError(
+            f"{path}: ожидался объект JSON — проверь файл, runtime.py его не перезаписывает"
+        )
+    if data.get("host") in HOSTS and data.get("level") is None and old.get("level"):
+        data = {**data, **roles(data["host"], old["level"])}
     old.update(data)
     with tempfile.TemporaryDirectory(dir=path.parent) as directory:
         candidate = Path(directory) / "runtime.json"
@@ -208,12 +235,15 @@ def write(path, data):
         os.replace(candidate, path)
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--host', choices=['claude', 'codex'])
-    parser.add_argument('--level', help='название выбранного уровня из брифа')
-    parser.add_argument('--write', metavar='RUNTIME_JSON', help='слить результат в этот файл (Исходники/runtime.json папки задания)')
+    parser.add_argument("--host", choices=HOSTS)
+    parser.add_argument("--level", help="название выбранного уровня из брифа")
+    parser.add_argument(
+        "--write",
+        metavar="RUNTIME_JSON",
+        help="слить результат в этот файл (Исходники/runtime.json папки задания)",
+    )
     args = parser.parse_args()
     try:
         result = context(args.host, args.level)
@@ -221,4 +251,4 @@ if __name__ == '__main__':
             write(args.write, result)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (OSError, ValueError) as error:
-        parser.exit(2, str(error) + '\n')
+        parser.exit(2, str(error) + "\n")

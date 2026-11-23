@@ -1,5 +1,5 @@
 interface:
   display_name: "preza"
-  short_description: "Редактируемая презентация, дизайн по контексту и визуальная проверка через Orca"
+  short_description: "Редактируемая презентация, дизайн по контексту и визуальная проверка финальных слайдов"
 policy:
   allow_implicit_invocation: false

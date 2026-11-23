@@ -2,7 +2,7 @@
 """Папки работы preza: где запущена сессия, каркас предмета, папка задания, порядок в ней.
 
     python3 scaffold.py find [<папка запуска>]
-    python3 scaffold.py init <папка> --kind subject|company [--host claude|codex]
+    python3 scaffold.py init <папка> --kind subject|company [--host claude|codex|manual]
     python3 scaffold.py work <корень> [--series S] [--task T]
     python3 scaffold.py check <папка задания>
     python3 scaffold.py --selftest
@@ -34,7 +34,9 @@ FOLDERS = {
 }
 CONTEXT_DIRS = {"Лекции", "Задания", "Задание", "Материалы", "Конспекты", "Бренд"}
 SECTION = "## Презентации"
-SECTION_RE = re.compile(r"^## Презентации\s*$", re.M)  # «## Презентации курса» — чужой раздел
+SECTION_RE = re.compile(
+    r"^## Презентации\s*$", re.M
+)  # «## Презентации курса» — чужой раздел
 BAD_NAME = re.compile(r'[/\\:*?"<>|]|\.\.|^[.\s]|\s$')
 TEMPLATES = {
     "КУРС.md": ("Требования к сдаче", "Имена файлов", "Решения владельца"),
@@ -53,16 +55,26 @@ TEMPLATES = {
     ),
 }
 START, END = "<!-- preza:start -->", "<!-- preza:end -->"
-COMMAND = {"claude": "/preza:preza", "codex": "$preza:preza"}
+COMMAND = {
+    "claude": "вызови `/preza:preza` в этой папке",
+    "codex": "вызови `$preza:preza` в этой папке",
+    "manual": "передай текущему агенту `skills/preza/SKILL.md` из установленной копии preza и укажи эту папку",
+}
 BLOCK = (
     f"{START}\n## Презентации (preza)\n"
-    "Презентации по этой папке делаются через `{command}`, запуск отсюда. "
+    "Для презентации {command}. "
     "Структура: `<Серия>/<Задание>/` — сверху сдача и `PLAN.md`, рабочее в `Исходники/` (1-вход … 6-архив). "
     "Память: `{memory}` здесь и `ПРОЕКТ.md` в папке серии. "
     f"Дорабатывая готовую работу без preza, сначала прочитай её `PLAN.md`.\n{END}\n"
 )
-PROJECT = re.compile(r"_ppt\d+_\d{8}")  # папка проекта ppt-master: <имя>_ppt169_20261027
-PROJECT_MARKS = ("svg_output", "design_spec.md", "spec_lock.md")  # без формата в имени — по содержимому
+PROJECT = re.compile(
+    r"_ppt\d+_\d{8}"
+)  # папка проекта ppt-master: <имя>_ppt169_20261027
+PROJECT_MARKS = (
+    "svg_output",
+    "design_spec.md",
+    "spec_lock.md",
+)  # без формата в имени — по содержимому
 TRACES = {
     "script.md",
     "runtime.json",
@@ -102,11 +114,15 @@ def read_json(path, strict=False):
         return {}
     except (OSError, ValueError) as error:
         if strict:
-            raise ValueError(f"{path}: не читается как JSON ({error}) — проверь файл, preza его не перезаписывает") from error
+            raise ValueError(
+                f"{path}: не читается как JSON ({error}) — проверь файл, preza его не перезаписывает"
+            ) from error
         return {}
     if not isinstance(data, dict):
         if strict:
-            raise ValueError(f"{path}: ожидался объект JSON — проверь файл, preza его не перезаписывает")
+            raise ValueError(
+                f"{path}: ожидался объект JSON — проверь файл, preza его не перезаписывает"
+            )
         return {}
     return data
 
@@ -166,7 +182,9 @@ def list_series(root):
         if not p.is_dir() or nfc(p.name) in CONTEXT_DIRS or nfc(p.name) == SRC:
             continue
         tasks = {
-            nfc(t.name): task_kind(t, deep=True) for t in sorted(visible(p)) if t.is_dir()
+            nfc(t.name): task_kind(t, deep=True)
+            for t in sorted(visible(p))
+            if t.is_dir()
         }
         if (kind := task_kind(p)) != "other":
             # серия — сама работа: заданиями считаются только новые папки заданий рядом с её файлами
@@ -181,8 +199,12 @@ def list_series(root):
 
 def located(kind, folder):
     """memory — вид файла памяти (subject|company|None); series_dir — папка серии работы (None — работа в корне или вне предмета)."""
-    task = folder.parent if nfc(folder.name).startswith(SRC) else folder  # старая работа в «Исходники…»
-    memory, root = memory_root(task.parent, 2)  # <корень>/<серия>/<задание>[/work — старая работа]
+    task = (
+        folder.parent if nfc(folder.name).startswith(SRC) else folder
+    )  # старая работа в «Исходники…»
+    memory, root = memory_root(
+        task.parent, 2
+    )  # <корень>/<серия>/<задание>[/work — старая работа]
     parts = task.relative_to(root).parts if root else ()
     # старая работа прямо в корне предмета — сама серия (там же ПРОЕКТ.md, который кладёт work)
     series = root / parts[0] if len(parts) > 1 or (kind == "legacy" and parts) else None
@@ -256,7 +278,7 @@ def init(root, kind, host="codex"):
         if not any((root / n).is_dir() for n in names):
             (root / names[0]).mkdir()
     append_block(
-        root / ("AGENTS.md" if host == "codex" else "CLAUDE.md"), MEMORY[kind], host
+        root / ("CLAUDE.md" if host == "claude" else "AGENTS.md"), MEMORY[kind], host
     )
 
 
@@ -278,7 +300,7 @@ def resolve_series(root, series):
 def valid_name(name):
     if not name or BAD_NAME.search(name):
         raise ValueError(
-            f"имя «{name}» не годится для папки: без / \\ : * ? \" < > |, «..», точки и пробела по краям"
+            f'имя «{name}» не годится для папки: без / \\ : * ? " < > |, «..», точки и пробела по краям'
         )
 
 
@@ -295,7 +317,11 @@ def work(root, series=None, task=None):
     if base.is_dir():
         read_json(base / SRC / "runtime.json", strict=True)
     # подпапки — только у папки задания: у отдельной папки они могут быть чужими работами
-    if base.exists() and not is_work(base) and (old := legacy_dir(base, deep=bool(task))):
+    if (
+        base.exists()
+        and not is_work(base)
+        and (old := legacy_dir(base, deep=bool(task)))
+    ):
         raise ValueError(
             f"{base} — старая работа (её PLAN.md — в {old}): продолжай по старым путям (layout.md), структуру создаст миграция"
         )
@@ -389,7 +415,11 @@ def selftest():
             and find(subject / "Лекции")["here"] == ""
         )
         task = Path(paths["work"])
-        for name in ("Тема_Иванов_Петров.pptx", "~$Тема_Иванов_Петров.pptx", "Анкета.md"):
+        for name in (
+            "Тема_Иванов_Петров.pptx",
+            "~$Тема_Иванов_Петров.pptx",
+            "Анкета.md",
+        ):
             (task / name).write_text("", encoding="utf-8")
         (task / "work").mkdir()  # рабочая папка другого конвейера пользователя
         assert check(task) == []
@@ -436,19 +466,39 @@ def selftest():
         (pair / "notes").mkdir(parents=True)
         (pair / "PLAN.md").write_text("старый план", encoding="utf-8")
         new = Path(work(subject, "Ольга + Анна", "Тема 2")["work"])
-        assert new == pair / "Тема 2" and (pair / "PLAN.md").read_text(encoding="utf-8") == "старый план"
-        assert find(subject)["series"]["Анна + Ольга"] == {"kind": "legacy", "tasks": {"Тема 2": "work"}}
-        assert find(pair)["series_dir"] == str(pair)  # старая работа в корне предмета — сама серия
-        assert find(new)["series_dir"] == str(pair) and find(new)["root"] == str(subject)
+        assert (
+            new == pair / "Тема 2"
+            and (pair / "PLAN.md").read_text(encoding="utf-8") == "старый план"
+        )
+        assert find(subject)["series"]["Анна + Ольга"] == {
+            "kind": "legacy",
+            "tasks": {"Тема 2": "work"},
+        }
+        assert find(pair)["series_dir"] == str(
+            pair
+        )  # старая работа в корне предмета — сама серия
+        assert find(new)["series_dir"] == str(pair) and find(new)["root"] == str(
+            subject
+        )
         assert find(paths["work"])["series_dir"] == str(subject / "Иванов + Петров")
-        dz = subject / "Мое 2" / "ДЗ-3"  # старая работа в <Задание>/work/ (стратмаркетинг)
+        dz = (
+            subject / "Мое 2" / "ДЗ-3"
+        )  # старая работа в <Задание>/work/ (стратмаркетинг)
         (dz / "work" / "deck_20261008" / "svg_output").mkdir(parents=True)
         (dz / "work" / "PLAN.md").write_text("", encoding="utf-8")
         assert find(subject)["series"]["Мое 2"]["tasks"] == {"ДЗ-3": "legacy"}
         got = find(dz)
-        assert got["kind"] == "legacy" and got["work"] == str(dz / "work") and got["root"] == str(subject)
-        assert got["series_dir"] == str(subject / "Мое 2") and got["memory"] == "subject"
-        inside = find(dz / "work" / "deck_20261008" / "svg_output")  # три уровня ниже предмета — память предмета та же
+        assert (
+            got["kind"] == "legacy"
+            and got["work"] == str(dz / "work")
+            and got["root"] == str(subject)
+        )
+        assert (
+            got["series_dir"] == str(subject / "Мое 2") and got["memory"] == "subject"
+        )
+        inside = find(
+            dz / "work" / "deck_20261008" / "svg_output"
+        )  # три уровня ниже предмета — память предмета та же
         assert inside["root"] == str(subject) and inside["work"] == str(dz / "work")
         try:
             work(subject, "Мое 2", "ДЗ-3")
@@ -461,29 +511,44 @@ def selftest():
             raise AssertionError("непустая папка без --task")
         except ValueError as error:
             assert "--task" in str(error), error
-        copy = subject / "Мое 2" / "ДЗ-5"  # копия пользователя с более свежим PLAN.md не перехватывает работу
+        copy = (
+            subject / "Мое 2" / "ДЗ-5"
+        )  # копия пользователя с более свежим PLAN.md не перехватывает работу
         (copy / "notes").mkdir(parents=True)
         (copy / "PLAN.md").write_text("", encoding="utf-8")
         os.utime(copy / "PLAN.md", (time.time() - 3600, time.time() - 3600))
         (copy / "backup_v1" / "notes").mkdir(parents=True)
         (copy / "backup_v1" / "PLAN.md").write_text("", encoding="utf-8")
         assert find(copy)["work"] == str(copy)
-        sample = subject / "Мое 2" / "ДЗ-6"  # образец прошлой работы внутри нового задания
+        sample = (
+            subject / "Мое 2" / "ДЗ-6"
+        )  # образец прошлой работы внутри нового задания
         (sample / "ДЗ-5 образец" / "notes").mkdir(parents=True)
         (sample / "ДЗ-5 образец" / "PLAN.md").write_text("", encoding="utf-8")
-        assert find(sample)["kind"] == "subject" and Path(work(subject, "Мое 2", "ДЗ-6")["work"]) == sample
-        two = subject / "Реферат 4"  # две папки «Исходники…»: берётся та, где PLAN.md свежее
+        assert (
+            find(sample)["kind"] == "subject"
+            and Path(work(subject, "Мое 2", "ДЗ-6")["work"]) == sample
+        )
+        two = (
+            subject / "Реферат 4"
+        )  # две папки «Исходники…»: берётся та, где PLAN.md свежее
         for name, age in (("Исходники и проверка", 86400), ("Исходники v2", 0)):
             (two / name / "notes").mkdir(parents=True)
             plan = two / name / "PLAN.md"
             plan.write_text("", encoding="utf-8")
             os.utime(plan, (time.time() - age, time.time() - age))
         assert find(two)["work"] == str(two / "Исходники v2")
-        same = time.time() - 7200  # одинаковое время — выбор по правилу, а не по порядку каталога
+        same = (
+            time.time() - 7200
+        )  # одинаковое время — выбор по правилу, а не по порядку каталога
         for name in ("Исходники и проверка", "Исходники v2"):
             os.utime(two / name / "PLAN.md", (same, same))
-        assert find(two)["work"] == str(two / max(("Исходники и проверка", "Исходники v2")))
-        broken = subject / "Иванов + Петров" / "ДЗ-5"  # битый runtime.json: ошибка, а не «передай --task»
+        assert find(two)["work"] == str(
+            two / max(("Исходники и проверка", "Исходники v2"))
+        )
+        broken = (
+            subject / "Иванов + Петров" / "ДЗ-5"
+        )  # битый runtime.json: ошибка, а не «передай --task»
         (broken / SRC).mkdir(parents=True)
         (broken / SRC / "runtime.json").write_text("[", encoding="utf-8")
         try:
@@ -492,32 +557,55 @@ def selftest():
         except ValueError as error:
             assert "runtime.json" in str(error)
         assert (broken / SRC / "runtime.json").read_text(encoding="utf-8") == "["
-        stale = subject / "Долг 2" / "доработка"  # задание — старая работа: отказ до записи ПРОЕКТ.md
+        stale = (
+            subject / "Долг 2" / "доработка"
+        )  # задание — старая работа: отказ до записи ПРОЕКТ.md
         (stale / "notes").mkdir(parents=True)
         (stale / "PLAN.md").write_text("", encoding="utf-8")
-        for bad in (("Долг 2", "доработка"), ("../x", "т"), ("Мое", "Доходы/расходы"), ("Мое", ".скрытая")):
+        for bad in (
+            ("Долг 2", "доработка"),
+            ("../x", "т"),
+            ("Мое", "Доходы/расходы"),
+            ("Мое", ".скрытая"),
+        ):
             try:
                 work(subject, *bad)
                 raise AssertionError(bad)
             except ValueError:
                 pass
-        assert not (subject / "Долг 2" / SERIES_MEMORY).exists() and not (tmp / "x").exists()
-        v2 = subject / "Реферат 1" / "Исходники v2"  # старая работа, убранная в «Исходники v2»
+        assert (
+            not (subject / "Долг 2" / SERIES_MEMORY).exists()
+            and not (tmp / "x").exists()
+        )
+        v2 = (
+            subject / "Реферат 1" / "Исходники v2"
+        )  # старая работа, убранная в «Исходники v2»
         (v2 / "notes").mkdir(parents=True)
         (v2 / "PLAN.md").write_text("", encoding="utf-8")
-        assert find(subject / "Реферат 1")["kind"] == "legacy" and find(v2)["work"] == str(v2)
-        dated = subject / "Реферат 3"  # проект ppt-master без формата в имени — по содержимому
+        assert find(subject / "Реферат 1")["kind"] == "legacy" and find(v2)[
+            "work"
+        ] == str(v2)
+        dated = (
+            subject / "Реферат 3"
+        )  # проект ppt-master без формата в имени — по содержимому
         (dated / "deck_20261020" / "svg_output").mkdir(parents=True)
         (dated / "PLAN.md").write_text("", encoding="utf-8")
         assert find(dated)["kind"] == "legacy"
         deep = Path(paths["build"]) / "проект" / ".review" / "backup"
         deep.mkdir(parents=True)
         assert find(deep)["kind"] == "work"
-        course = tmp / "Курс 2"  # чужой раздел «## Презентации курса» — свой раздел всё равно дописывается
+        course = (
+            tmp / "Курс 2"
+        )  # чужой раздел «## Презентации курса» — свой раздел всё равно дописывается
         course.mkdir()
-        (course / "КУРС.md").write_text("# Курс\n\n## Презентации курса\n", encoding="utf-8")
+        (course / "КУРС.md").write_text(
+            "# Курс\n\n## Презентации курса\n", encoding="utf-8"
+        )
         init(course, "subject")
-        assert len(SECTION_RE.findall((course / "КУРС.md").read_text(encoding="utf-8"))) == 1
+        assert (
+            len(SECTION_RE.findall((course / "КУРС.md").read_text(encoding="utf-8")))
+            == 1
+        )
         brand = tmp / "Компания"
         brand.mkdir()
         init(brand, "company")
