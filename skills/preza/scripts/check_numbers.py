@@ -7,6 +7,7 @@
 - --pptx deck.pptx: текст фигур и таблиц, категории и значения рядов нативных графиков слайда N
   сверяются с утверждениями usage[N]; сопоставление «число → утверждение» пишется в отчёт
   для содержательной сверки при аудите.
+Время ЧЧ:ММ сверяется целиком с временем в реестре или периоде. Для ЧЧ:00 подходит зарегистрированный час.
 Годы (четыре цифры подряд, 19xx–20xx) и номера «Тема/Слайд/Эпизод N» не проверяются. Слайд с usage = SKIP (источники) пропускается.
 
 Скрипт лежит в <проект>/data/ (копия из навыка preza). Запуск: python3 data/check_numbers.py [--script script.md] [--pptx deck.pptx --report out.md]
@@ -33,6 +34,9 @@ usage = {
 DATE = re.compile(
     r"(?<![\d.])(\d{2}\.)?(\d{2})\.(\d{4})(?!\.?\d)"
 )  # 02.12.2024 и 12.2024
+CLOCK = re.compile(r"(?<![\w:])([01]?\d|2[0-3]):([0-5]\d)(?![\w:])")
+CLOCK_CUE = re.compile(r"\b(?:в|к|с|до|после|около|at|before|after|until|from)\s*$", re.I)
+HOUR_UNITS = {"ч", "час", "часа", "часов", "часы", "h", "hour", "hours"}
 NUM = re.compile(
     r"(?<![\d.,A-Za-zА-Яа-яЁё])([−+-])?(\d{1,3}(?:[   ]\d{3})+|\d+)(?:[.,](\d+))?"
 )
@@ -50,6 +54,20 @@ def to_float(s):
 
 def claim_dates(c):
     return {m.group(0) for m in DATE.finditer(c["value"] + " " + c["period"])}
+
+
+def claim_clocks(c):
+    clocks = {
+        (int(h), int(m)) for h, m in CLOCK.findall(c["value"] + " " + c["period"])
+    }
+    value = c["value"].strip()
+    if (
+        c["unit"].lower().strip(" .") in HOUR_UNITS
+        and value.isdecimal()
+        and int(value) < 24
+    ):
+        clocks.add((int(value), 0))
+    return clocks
 
 
 # --- 1. Реестр: calc-значения и источники ---
@@ -87,6 +105,36 @@ def check_fragment(where, slide, text, context, require_context, report):
                 f"{where}: дата {m.group(0)} не относится к утверждениям слайда {slide}"
             )
     text = DATE.sub(" ", text)
+    clock_evidence = {c["id"]: claim_clocks(c) for c in allowed} if ":" in text else {}
+
+    def match_clock(m):
+        hour, minute = map(int, m.groups())
+        hits = [c for c in allowed if (hour, minute) in clock_evidence[c["id"]]]
+        if not hits and not CLOCK_CUE.search(m.string[: m.start()]):
+            return m[
+                0
+            ]  # An unqualified 1:10 can be a ratio; verify both numbers below.
+        if require_context:
+            # A registry can use the equivalent spelling "17 ч" as its context.
+            hour_context = (
+                context.replace(m[0], f"{hour} ч") if minute == 0 else context
+            )
+            hits = [
+                c
+                for c in hits
+                if re.search(c["context"], context, re.I)
+                or re.search(c["context"], hour_context, re.I)
+            ]
+        if hits:
+            ids = ", ".join(c["id"] for c in hits)
+            report.append(f"| {slide} | {m[0]} | {ids} | {hits[0]['claim']} |")
+        else:
+            errors.append(
+                f"{where}: время {m[0]} не привязано к утверждению слайда {slide}"
+            )
+        return " "
+
+    text = CLOCK.sub(match_clock, text)
     for m in NUM.finditer(text):
         sign, whole, frac = m.groups()
         prev = text[max(0, m.start() - 1) : m.start()]
@@ -97,8 +145,10 @@ def check_fragment(where, slide, text, context, require_context, report):
         token = m.group(0).strip("  ")
         hits = []
         for c in allowed:
-            cv = to_float(c["value"]) if not DATE.fullmatch(c["value"]) else None
-            if cv is None or abs(cv) != val:
+            if DATE.fullmatch(c["value"]) or CLOCK.fullmatch(c["value"]):
+                continue
+            cv = to_float(c["value"])
+            if abs(cv) != val:
                 continue
             if explicit in ("−", "-") and cv >= 0 or explicit == "+" and cv < 0:
                 continue
