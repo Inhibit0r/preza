@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -48,10 +49,12 @@ class NumbersTests(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
+                    env={**os.environ, "PYTHONIOENCODING": "cp1252"},
                 )
 
             valid = run("Смена в 9:30. Следующая смена с 17:00. Соотношение 1:10.")
             self.assertEqual(valid.returncode, 0, valid.stdout + valid.stderr)
+            self.assertIn("чисел сопоставлено", valid.stdout)
             rows = report.read_text(encoding="utf-8")
             self.assertIn("| 17:00 | H |", rows)
             self.assertIn("| 9:30 | T |", rows)

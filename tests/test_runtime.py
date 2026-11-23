@@ -196,7 +196,13 @@ class RuntimeTests(unittest.TestCase):
                         self.assertIsNone(
                             runtime.find_skill("ppt-master", "claude", root)
                         )
-                    ctx = runtime.context("manual")
+                    with patch.object(
+                        Path, "home", side_effect=RuntimeError("no user profile")
+                    ):
+                        ctx = runtime.context("manual")
+                        self.assertEqual(
+                            runtime.find_skill("preza", "manual"), ROOT / "skills/preza"
+                        )
                     self.assertIsNone(ctx["orca"])
                     self.assertIsNone(ctx["codex_cli"])
                     self.assertEqual(ctx["engine_source"], "pinned")

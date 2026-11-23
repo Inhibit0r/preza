@@ -17,6 +17,7 @@ import argparse
 import csv
 import json
 import re
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -225,6 +226,8 @@ def check_pptx(path, report):
 
 
 if __name__ == "__main__":
+    if not sys.stdout.isatty():
+        sys.stdout.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser()
     ap.add_argument("--script")
     ap.add_argument("--pptx")

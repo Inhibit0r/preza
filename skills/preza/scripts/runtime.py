@@ -15,11 +15,15 @@ ENGINE_REVISION = "1ab8a4df202677e442daebcc21931e33fbcc08df"
 HOSTS = ("claude", "codex", "manual")
 
 
+def user_home(home):
+    return Path.home() if home is None else Path(home)
+
+
 def data_root(home=None):
     override = os.environ.get("PREZA_DATA_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    return (Path.home() if home is None else Path(home)) / ".local" / "share" / "preza"
+    return user_home(home) / ".local" / "share" / "preza"
 
 
 def engine_checkout(home=None):
@@ -84,8 +88,9 @@ def roles(host, level=None):
 
 
 def claude_root(home=None):
-    home = Path.home() if home is None else Path(home)
-    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or home / ".claude").expanduser()
+    return Path(
+        os.environ.get("CLAUDE_CONFIG_DIR") or user_home(home) / ".claude"
+    ).expanduser()
 
 
 def installed_claude_plugins(home=None):
@@ -114,7 +119,6 @@ def registered_claude_skill(name, home):
 
 def find_skill(name, host=None, home=None):
     host = resolve_host(host)
-    home = Path.home() if home is None else Path(home)
     isolated = bool(os.environ.get("PREZA_DATA_DIR"))
     if name == "ppt-master":
         override = os.environ.get("PREZA_PPT_MASTER")
@@ -131,9 +135,9 @@ def find_skill(name, host=None, home=None):
             return legacy
     roots = [SKILLS, data_root(home) / "skills"]
     if not isolated:
-        roots.append(home / ".agents/skills")
+        roots.append(user_home(home) / ".agents/skills")
     if host == "codex":
-        codex = Path(os.environ.get("CODEX_HOME") or home / ".codex")
+        codex = Path(os.environ.get("CODEX_HOME") or user_home(home) / ".codex")
         roots.extend((codex / "skills", codex / "skills/.system"))
     if host == "claude":
         roots.append(claude_root(home) / "skills")
