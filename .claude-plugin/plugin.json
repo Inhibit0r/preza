@@ -1,6 +1,6 @@
 {
   "name": "preza",
-  "version": "1.4.0-rc.4",
+  "version": "1.4.0",
   "description": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
   "author": {
     "name": "Inhibit0r",

@@ -12,7 +12,7 @@
       "description": "Редактируемые презентации PowerPoint с PPT Master. Бриф, дизайн, речь и проверка финальных слайдов в текущем хосте.",
       "source": "./",
       "category": "productivity",
-      "version": "1.4.0-rc.4"
+      "version": "1.4.0"
     },
     {
       "name": "ppt-master",
